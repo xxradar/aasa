@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AASA — AI Agent Attack Surface Analyzer</title>
+<style>
+  :root {
+    --bg: #0a0e17; --bg2: #111827; --bg3: #1f2937;
+    --fg: #e5e7eb; --fg2: #9ca3af; --fg3: #6b7280;
+    --accent: #3b82f6; --accent2: #60a5fa;
+    --red: #ef4444; --orange: #f59e0b; --yellow: #eab308;
+    --green: #22c55e; --purple: #a855f7;
+    --crit-bg: #7f1d1d; --high-bg: #7c2d12; --med-bg: #713f12; --low-bg: #1e3a5f;
+    --radius: 8px; --font: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 14px; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+  /* Header */
+  .header { text-align: center; padding: 40px 0 20px; border-bottom: 1px solid var(--bg3); margin-bottom: 20px; }
+  .header h1 { font-size: 24px; color: var(--accent2); margin-bottom: 8px; }
+  .header p { color: var(--fg3); font-size: 13px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 2px solid var(--bg3); }
+  .tab {
+    padding: 10px 20px; cursor: pointer; color: var(--fg3); font-size: 13px; font-family: var(--font);
+    border-bottom: 2px solid transparent; margin-bottom: -2px; background: none; border-top: none; border-left: none; border-right: none;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .tab:hover { color: var(--fg2); }
+  .tab.active { color: var(--accent2); border-bottom-color: var(--accent); font-weight: bold; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Scan Form */
+  .scan-form { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .scan-form input[type="url"], .scan-form input[type="text"] {
+    flex: 1; min-width: 300px; padding: 12px 16px; background: var(--bg2); border: 1px solid var(--bg3);
+    color: var(--fg); border-radius: var(--radius); font-family: var(--font); font-size: 14px;
+  }
+  .scan-form input:focus { outline: none; border-color: var(--accent); }
+  .btn {
+    padding: 12px 24px; color: white; border: none; border-radius: var(--radius);
+    cursor: pointer; font-family: var(--font); font-weight: bold; font-size: 14px; white-space: nowrap;
+  }
+  .btn-primary { background: var(--accent); }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-pdf { background: var(--red); }
+  .btn-pdf:hover { background: #dc2626; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Scan type switch */
+  .scan-type-switch { display: flex; gap: 0; margin-bottom: 16px; }
+  .scan-type-btn {
+    padding: 8px 20px; background: var(--bg3); color: var(--fg3); border: 1px solid var(--bg3);
+    cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: bold; transition: all 0.2s;
+  }
+  .scan-type-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .scan-type-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+  .scan-type-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .scan-type-btn:hover:not(.active) { background: #374151; }
+
+  /* Options row */
+  .options { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+  .options label { display: flex; align-items: center; gap: 6px; color: var(--fg2); font-size: 13px; cursor: pointer; }
+  .options input[type="number"] {
+    width: 60px; padding: 4px 8px; background: var(--bg2); border: 1px solid var(--bg3);
+    color: var(--fg); border-radius: 4px; font-family: var(--font);
+  }
+  .options input[type="checkbox"] { accent-color: var(--accent); }
+
+  /* Status */
+  .status { padding: 16px; background: var(--bg2); border-radius: var(--radius); margin-bottom: 20px; display: none; }
+  .status.active { display: flex; align-items: center; gap: 12px; }
+  .status .spinner { display: inline-block; animation: spin 1s linear infinite; font-size: 18px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .status .phase-bar { flex: 1; height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+  .status .phase-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
+
+  /* Summary Cards */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 30px; }
+  .card { background: var(--bg2); border-radius: var(--radius); padding: 16px; border: 1px solid var(--bg3); }
+  .card .label { color: var(--fg3); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .card .value { font-size: 28px; font-weight: bold; margin-top: 4px; }
+  .card.risk .value { color: var(--green); }
+  .card.risk.high .value { color: var(--orange); }
+  .card.risk.critical .value { color: var(--red); }
+  .risk-bar { height: 8px; background: var(--bg3); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+  .risk-bar .fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+
+  /* Findings */
+  .findings-section h2 { font-size: 16px; margin-bottom: 16px; color: var(--fg2); }
+  .finding { background: var(--bg2); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 8px; border-left: 4px solid var(--fg3); }
+  .finding.critical { border-left-color: var(--red); background: var(--crit-bg); }
+  .finding.high { border-left-color: var(--orange); background: var(--high-bg); }
+  .finding.medium { border-left-color: var(--yellow); background: var(--med-bg); }
+  .finding.low { border-left-color: var(--accent); background: var(--low-bg); }
+  .finding .f-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .finding .f-title { font-weight: bold; font-size: 13px; }
+  .finding .f-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; font-weight: bold; }
+  .finding.critical .f-badge { background: var(--red); color: white; }
+  .finding.high .f-badge { background: var(--orange); color: black; }
+  .finding.medium .f-badge { background: var(--yellow); color: black; }
+  .finding.low .f-badge { background: var(--accent); color: white; }
+  .finding.info .f-badge { background: var(--fg3); color: white; }
+  .finding .f-meta { color: var(--fg3); font-size: 11px; margin-bottom: 4px; }
+  .finding .f-desc { color: var(--fg2); font-size: 12px; line-height: 1.5; }
+  .finding .f-evidence { margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 4px; font-size: 11px; color: var(--fg3); white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto; }
+  .finding .f-fix { margin-top: 6px; color: var(--green); font-size: 12px; }
+  .dedup-info { display: inline; margin-left: 12px; font-size: 11px; color: var(--fg3); font-weight: normal; }
+
+  /* Agentic files */
+  .agentic-files { margin-bottom: 30px; }
+  .af-item { background: var(--bg2); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 8px; border: 1px solid var(--purple); }
+  .af-item .af-name { color: var(--purple); font-weight: bold; }
+  .af-item .af-url { color: var(--fg3); font-size: 12px; }
+
+  /* LLM Summary */
+  .llm-summary { background: var(--bg2); border-radius: var(--radius); padding: 20px; margin-bottom: 30px; border: 1px solid var(--accent); white-space: pre-wrap; line-height: 1.6; color: var(--fg2); font-size: 13px; }
+
+  /* Filter */
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar button { padding: 6px 12px; background: var(--bg3); color: var(--fg2); border: none; border-radius: 4px; cursor: pointer; font-family: var(--font); font-size: 12px; }
+  .filter-bar button.active { background: var(--accent); color: white; }
+
+  /* History table */
+  .history-table { width: 100%; border-collapse: collapse; }
+  .history-table th { text-align: left; padding: 10px 12px; background: var(--bg2); color: var(--fg3); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--bg3); }
+  .history-table td { padding: 10px 12px; border-bottom: 1px solid var(--bg3); font-size: 13px; color: var(--fg2); }
+  .history-table tr:hover td { background: var(--bg2); }
+  .history-table .url-cell { max-width: 400px; word-break: break-all; }
+  .risk-pill { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+  .risk-crit { background: var(--red); color: white; }
+  .risk-high { background: var(--orange); color: black; }
+  .risk-med { background: var(--yellow); color: black; }
+  .risk-low { background: var(--green); color: white; }
+  .load-btn { padding: 4px 12px; background: var(--bg3); color: var(--fg2); border: none; border-radius: 4px; cursor: pointer; font-family: var(--font); font-size: 11px; }
+  .load-btn:hover { background: var(--accent); color: white; }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--fg3); }
+  .hidden { display: none !important; }
+
+  /* Rules */
+  .rule-card { background: var(--bg2); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; border: 1px solid var(--bg3); }
+  .rule-card.state-active { border-left: 4px solid var(--green); }
+  .rule-card.state-candidate { border-left: 4px solid var(--yellow); }
+  .rule-card.state-validated { border-left: 4px solid var(--accent); }
+  .rule-card.state-rejected { border-left: 4px solid var(--fg3); opacity: 0.6; }
+  .rule-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .rule-title { font-weight: bold; font-size: 13px; }
+  .rule-meta { color: var(--fg3); font-size: 11px; margin-bottom: 6px; }
+  .rule-regex { font-family: var(--font); font-size: 12px; background: var(--bg); padding: 6px 10px; border-radius: 4px; color: var(--accent2); margin: 6px 0; word-break: break-all; }
+  .rule-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .rule-actions button { padding: 4px 12px; border: none; border-radius: 4px; cursor: pointer; font-family: var(--font); font-size: 11px; }
+  .rule-btn-promote { background: var(--green); color: white; }
+  .rule-btn-promote:hover { background: #16a34a; }
+  .rule-btn-reject { background: var(--red); color: white; }
+  .rule-btn-reject:hover { background: #dc2626; }
+  .rule-btn-delete { background: var(--bg3); color: var(--fg3); }
+  .rule-btn-delete:hover { background: #374151; }
+  .rule-btn-test { background: var(--accent); color: white; }
+  .rule-btn-test:hover { background: var(--accent2); }
+  .state-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; font-weight: bold; }
+  .state-badge.candidate { background: var(--yellow); color: black; }
+  .state-badge.validated { background: var(--accent); color: white; }
+  .state-badge.active { background: var(--green); color: white; }
+  .state-badge.rejected { background: var(--fg3); color: white; }
+  .rule-detail { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--bg3); }
+  .rule-detail.open { display: block; }
+  .rule-detail .detail-row { font-size: 11px; color: var(--fg3); margin-bottom: 4px; }
+  .rule-detail .detail-label { color: var(--fg2); font-weight: bold; }
+  .rule-test-input { display: flex; gap: 6px; margin-top: 8px; }
+  .rule-test-input input { flex: 1; padding: 4px 8px; background: var(--bg); border: 1px solid var(--bg3); color: var(--fg); border-radius: 4px; font-family: var(--font); font-size: 12px; }
+  .rule-test-result { margin-top: 4px; font-size: 11px; }
+  .rules-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .rules-summary .card .value { font-size: 24px; }
+
+  /* Usage */
+  .usage-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .usage-summary .card .value { font-size: 22px; }
+  .usage-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .usage-table th { text-align: left; padding: 8px 10px; background: var(--bg2); color: var(--fg3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--bg3); }
+  .usage-table td { padding: 8px 10px; border-bottom: 1px solid var(--bg3); color: var(--fg2); }
+  .usage-table tr:hover td { background: var(--bg2); }
+  .usage-section { background: var(--bg2); border-radius: var(--radius); padding: 16px; border: 1px solid var(--bg3); }
+  .usage-section h3 { font-size: 12px; color: var(--fg3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+  .cost-highlight { color: var(--green); font-weight: bold; }
+  .token-bar { display: flex; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .token-bar .input-fill { background: var(--accent); height: 100%; }
+  .token-bar .output-fill { background: var(--purple); height: 100%; }
+
+  /* Demo mode */
+  .demo-panel { background: var(--bg2); border: 1px solid var(--purple); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 20px; }
+  .demo-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .demo-header h3 { font-size: 14px; color: var(--purple); display: flex; align-items: center; gap: 8px; }
+  .demo-header h3::before { content: '⚗'; font-size: 16px; }
+  .demo-desc { color: var(--fg3); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
+  .demo-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn-demo { background: var(--purple); color: white; padding: 10px 20px; border: none; border-radius: var(--radius); cursor: pointer; font-family: var(--font); font-weight: bold; font-size: 13px; }
+  .btn-demo:hover { background: #9333ea; }
+  .btn-demo:disabled { opacity: 0.5; cursor: not-allowed; }
+  .demo-status { display: none; margin-top: 12px; }
+  .demo-status.active { display: block; }
+  .demo-scan-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12px; color: var(--fg2); }
+  .demo-scan-row .demo-type { color: var(--purple); font-weight: bold; min-width: 70px; }
+  .demo-scan-row .demo-scan-status { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; }
+  .demo-scan-row .demo-scan-status.running { background: var(--accent); color: white; }
+  .demo-scan-row .demo-scan-status.completed { background: var(--green); color: white; }
+  .demo-scan-row .demo-scan-status.failed { background: var(--red); color: white; }
+  .demo-scan-row .demo-scan-status.queued { background: var(--fg3); color: white; }
+  .demo-progress { width: 120px; height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+  .demo-progress .fill { height: 100%; background: var(--purple); border-radius: 2px; transition: width 0.3s; }
+
+  .footer { text-align: center; padding: 30px 0; color: var(--fg3); font-size: 11px; border-top: 1px solid var(--bg3); margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>AASA</h1>
+    <p>AI Agent Attack Surface Analyzer — Indirect Prompt Injection Scanner</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('scanner')">Scanner</button>
+    <button class="tab" onclick="switchTab('history')">Scan History</button>
+    <button class="tab" onclick="switchTab('rules')">Learned Rules</button>
+    <button class="tab" onclick="switchTab('usage')">LLM Usage</button>
+    <a href="/docs" target="_blank" style="margin-left: auto; padding: 10px 16px; font-size: 12px; color: var(--fg3);">OpenAPI Docs</a>
+  </div>
+
+  <!-- SCANNER TAB -->
+  <div class="tab-content active" id="tab-scanner">
+    <div class="scan-type-switch">
+      <button class="scan-type-btn active" onclick="setScanType('website')">Website Scan</button>
+      <button class="scan-type-btn" onclick="setScanType('pdf')">PDF Scan</button>
+    </div>
+
+    <!-- Website form -->
+    <div id="websiteForm">
+      <div class="scan-form">
+        <input type="url" id="targetUrl" placeholder="https://target-website.com" autofocus>
+        <button class="btn btn-primary" id="scanBtn" onclick="startScan()">Scan</button>
+      </div>
+      <div class="options">
+        <label>Depth: <input type="number" id="depth" value="2" min="0" max="5"></label>
+        <label>Max Pages: <input type="number" id="maxPages" value="50" min="1" max="500"></label>
+        <label><input type="checkbox" id="llmJudge" checked> LLM Judge</label>
+        <label><input type="checkbox" id="staticOnly"> Static Only</label>
+      </div>
+    </div>
+
+    <!-- PDF form -->
+    <div id="pdfForm" class="hidden">
+      <div class="scan-form">
+        <input type="url" id="pdfUrl" placeholder="https://example.com/document.pdf">
+        <button class="btn btn-pdf" id="pdfScanBtn" onclick="startPdfScan()">Scan PDF</button>
+      </div>
+      <div class="options">
+        <label><input type="checkbox" id="pdfLlmJudge"> AI Analysis (LLM Judge on extracted text)</label>
+        <p style="color: var(--fg3); font-size: 11px; margin-left: 8px;">
+          Static: hidden text, metadata, annotations, form fields, JS, XMP. AI: semantic injection, social engineering, context manipulation.
+        </p>
+      </div>
+    </div>
+
+    <!-- Status with progress -->
+    <div class="status" id="status">
+      <span class="spinner">⟳</span>
+      <div style="flex: 1;">
+        <div id="statusText" style="margin-bottom: 6px;">Scanning...</div>
+        <div class="phase-bar"><div class="phase-fill" id="phaseFill" style="width: 0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="hidden">
+      <div class="summary" id="summary"></div>
+      <div class="agentic-files hidden" id="agenticSection">
+        <h2>Agentic Signal Files</h2>
+        <div id="agenticFiles"></div>
+      </div>
+      <div class="llm-summary hidden" id="llmSummary"></div>
+      <div class="findings-section">
+        <h2>Findings <span class="dedup-info" id="dedupInfo"></span></h2>
+        <div class="filter-bar" id="filterBar"></div>
+        <div id="findings"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div class="tab-content" id="tab-history">
+    <div id="historyContent"><div class="empty-state">Loading scan history...</div></div>
+  </div>
+
+  <!-- RULES TAB -->
+  <div class="tab-content" id="tab-rules">
+    <!-- Demo Mode Panel -->
+    <div class="demo-panel" id="demoPanel">
+      <div class="demo-header">
+        <h3>Demo Mode — Test Rule Learning</h3>
+      </div>
+      <div class="demo-desc">
+        Launch demo scans against built-in poisoned test fixtures (a webpage with 10 attack patterns + a PDF with 8 attack patterns).
+        Both scans run with LLM Judge enabled, which generates candidate rules you can review, promote, or reject below.
+      </div>
+      <div class="demo-actions">
+        <button class="btn-demo" id="demoRunBtn" onclick="startDemo()">Run Demo Scans</button>
+        <span id="demoHint" style="color:var(--fg3);font-size:11px;">Scans poisoned webpage + poisoned PDF with AI analysis</span>
+      </div>
+      <div class="demo-status" id="demoStatus">
+        <div class="demo-scan-row">
+          <span class="demo-type">Website</span>
+          <span class="demo-scan-status queued" id="demoWebStatus">queued</span>
+          <div class="demo-progress"><div class="fill" id="demoWebProgress" style="width:0%"></div></div>
+          <span id="demoWebInfo" style="color:var(--fg3);font-size:11px;"></span>
+        </div>
+        <div class="demo-scan-row">
+          <span class="demo-type">PDF</span>
+          <span class="demo-scan-status queued" id="demoPdfStatus">queued</span>
+          <div class="demo-progress"><div class="fill" id="demoPdfProgress" style="width:0%"></div></div>
+          <span id="demoPdfInfo" style="color:var(--fg3);font-size:11px;"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="rulesStats" style="margin-bottom: 20px;"></div>
+    <div class="filter-bar" id="rulesFilter" style="margin-bottom: 16px;"></div>
+    <div id="rulesContent"><div class="empty-state">Loading learned rules...</div></div>
+  </div>
+
+  <!-- USAGE TAB -->
+  <div class="tab-content" id="tab-usage">
+    <div id="usageSummary" style="margin-bottom: 20px;"></div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:24px;">
+      <div id="usageByModel" style="flex:1;min-width:300px;"></div>
+      <div id="usageByPurpose" style="flex:1;min-width:300px;"></div>
+    </div>
+    <div id="usageByScan" style="margin-bottom:24px;"></div>
+    <h2 style="font-size:14px;color:var(--fg2);margin-bottom:12px;">Call Log</h2>
+    <div id="usageLog"><div class="empty-state">Loading usage data...</div></div>
+    <div style="margin-top:16px;text-align:right;">
+      <button class="btn-primary btn" style="padding:8px 16px;font-size:12px;background:var(--bg3);color:var(--fg3);" onclick="resetUsage()">Reset Counters</button>
+    </div>
+  </div>
+
+  <div class="footer">
+    AASA v0.1.0 — <a href="/openapi.json" target="_blank">OpenAPI Spec</a> | <a href="/docs" target="_blank">Swagger</a> | <a href="/redoc" target="_blank">ReDoc</a>
+  </div>
+</div>
+
+<script>
+let currentFilter = 'all';
+let scanData = null;
+let scanType = 'website';
+let pollTimer = null;
+
+const PHASE_PCT = { queued: 5, crawling: 15, downloading_pdf: 15, analyzing: 40, analyzing_pdf: 40, llm_analysis: 70, learning_rules: 85, completed: 100 };
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[onclick*="${tab}"]`).classList.add('active');
+  document.getElementById(`tab-${tab}`).classList.add('active');
+  if (tab === 'history') loadHistory();
+  if (tab === 'rules') loadRules();
+  if (tab === 'usage') loadUsage();
+}
+
+function setScanType(type) {
+  scanType = type;
+  document.querySelectorAll('.scan-type-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.scan-type-btn[onclick*="${type}"]`).classList.add('active');
+  document.getElementById('websiteForm').classList.toggle('hidden', type !== 'website');
+  document.getElementById('pdfForm').classList.toggle('hidden', type !== 'pdf');
+}
+
+// ── Async Polling ──────────────────────────────────────────
+function showStatus(text, phase) {
+  const el = document.getElementById('status');
+  el.classList.add('active');
+  document.getElementById('statusText').textContent = text;
+  const pct = PHASE_PCT[phase] || 10;
+  document.getElementById('phaseFill').style.width = pct + '%';
+}
+
+function hideStatus() {
+  document.getElementById('status').classList.remove('active');
+  document.getElementById('phaseFill').style.width = '0%';
+}
+
+async function pollScan(scanId, btn, btnLabel) {
+  const poll = async () => {
+    try {
+      const resp = await fetch(`/api/v1/scan/${scanId}`);
+      if (resp.status === 404) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        showStatus('Scan not found (may have been lost after restart). Check History tab.', 'failed');
+        btn.disabled = false;
+        btn.textContent = btnLabel;
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+
+      const status = data.status || 'unknown';
+      const phaseLabels = {
+        queued: 'Queued...',
+        crawling: 'Crawling pages...',
+        downloading_pdf: 'Downloading PDF...',
+        analyzing: 'Running static analyzers...',
+        analyzing_pdf: 'Analyzing PDF layers...',
+        llm_analysis: 'Running AI analysis (LLM Judge)...',
+        learning_rules: 'Extracting learned rules...',
+        completed: 'Scan complete!',
+      };
+
+      showStatus(phaseLabels[status] || `Status: ${status}`, status);
+
+      if (status === 'completed') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        hideStatus();
+        scanData = data;
+        renderResults(data);
+        btn.disabled = false;
+        btn.textContent = btnLabel;
+        return;
+      }
+
+      if (status.startsWith('failed')) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        document.getElementById('statusText').textContent = `Failed: ${status}`;
+        btn.disabled = false;
+        btn.textContent = btnLabel;
+        return;
+      }
+    } catch (e) {
+      // Network error during poll — keep trying
+      document.getElementById('statusText').textContent = `Polling... (${e.message})`;
+    }
+  };
+
+  showStatus('Starting scan...', 'queued');
+  pollTimer = setInterval(poll, 1500);
+  setTimeout(poll, 300); // immediate first check
+}
+
+// ── Website Scan (non-blocking) ────────────────────────────
+async function startScan() {
+  const url = document.getElementById('targetUrl').value.trim();
+  if (!url) return;
+
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  document.getElementById('results').classList.add('hidden');
+
+  try {
+    const body = {
+      url,
+      max_depth: parseInt(document.getElementById('depth').value),
+      max_pages: parseInt(document.getElementById('maxPages').value),
+      enable_llm_judge: document.getElementById('llmJudge').checked,
+      static_only: document.getElementById('staticOnly').checked,
+    };
+
+    const resp = await fetch('/api/v1/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const { scan_id } = await resp.json();
+    pollScan(scan_id, btn, 'Scan');
+
+  } catch (e) {
+    showStatus(`Error: ${e.message}`, 'queued');
+    btn.disabled = false;
+    btn.textContent = 'Scan';
+  }
+}
+
+// ── PDF Scan (non-blocking) ────────────────────────────────
+async function startPdfScan() {
+  const url = document.getElementById('pdfUrl').value.trim();
+  if (!url) return;
+
+  const btn = document.getElementById('pdfScanBtn');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing...';
+  document.getElementById('results').classList.add('hidden');
+
+  try {
+    const body = {
+      url,
+      enable_llm_judge: document.getElementById('pdfLlmJudge').checked,
+    };
+
+    const resp = await fetch('/api/v1/scan/pdf', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const { scan_id } = await resp.json();
+    pollScan(scan_id, btn, 'Scan PDF');
+
+  } catch (e) {
+    showStatus(`Error: ${e.message}`, 'queued');
+    btn.disabled = false;
+    btn.textContent = 'Scan PDF';
+  }
+}
+
+// ── Render Results ─────────────────────────────────────────
+function renderResults(data) {
+  document.getElementById('results').classList.remove('hidden');
+
+  const s = data.summary;
+  const riskClass = s.risk_score >= 70 ? 'critical' : s.risk_score >= 40 ? 'high' : '';
+  const riskColor = s.risk_score >= 70 ? '#ef4444' : s.risk_score >= 40 ? '#f59e0b' : '#22c55e';
+  document.getElementById('summary').innerHTML = `
+    <div class="card risk ${riskClass}">
+      <div class="label">Risk Score</div>
+      <div class="value">${s.risk_score.toFixed(1)}</div>
+      <div class="risk-bar"><div class="fill" style="width:${s.risk_score}%;background:${riskColor}"></div></div>
+    </div>
+    <div class="card"><div class="label">Pages</div><div class="value">${s.total_pages_crawled}</div></div>
+    <div class="card"><div class="label">Findings</div><div class="value">${s.total_findings}</div></div>
+    <div class="card"><div class="label">Critical</div><div class="value" style="color:#ef4444">${s.critical_count}</div></div>
+    <div class="card"><div class="label">High</div><div class="value" style="color:#f59e0b">${s.high_count}</div></div>
+    <div class="card"><div class="label">Agentic Files</div><div class="value" style="color:#a855f7">${s.agentic_files_found}</div></div>
+  `;
+
+  const agSec = document.getElementById('agenticSection');
+  if (data.agentic_files && data.agentic_files.length > 0) {
+    agSec.classList.remove('hidden');
+    document.getElementById('agenticFiles').innerHTML = data.agentic_files.map(af => `
+      <div class="af-item">
+        <span class="af-name">${esc(af.filename)}</span> (${af.size} bytes)
+        <div class="af-url">${esc(af.url)}</div>
+      </div>
+    `).join('');
+  } else { agSec.classList.add('hidden'); }
+
+  const llmEl = document.getElementById('llmSummary');
+  if (data.llm_judge_analysis) {
+    llmEl.classList.remove('hidden');
+    llmEl.textContent = data.llm_judge_analysis;
+  } else { llmEl.classList.add('hidden'); }
+
+  const dedupEl = document.getElementById('dedupInfo');
+  dedupEl.textContent = '';
+
+  const categories = [...new Set(data.findings.map(f => f.category))];
+  document.getElementById('filterBar').innerHTML = `
+    <button class="active" onclick="setFilter('all')">All (${data.findings.length})</button>
+    ${categories.map(c => {
+      const count = data.findings.filter(f => f.category === c).length;
+      return `<button onclick="setFilter('${c}')">${c} (${count})</button>`;
+    }).join('')}
+  `;
+
+  renderFindings(data.findings);
+}
+
+function setFilter(cat) {
+  currentFilter = cat;
+  document.querySelectorAll('.filter-bar button').forEach(b => {
+    b.classList.toggle('active', b.textContent.startsWith(cat === 'all' ? 'All' : cat));
+  });
+  if (scanData) renderFindings(scanData.findings);
+}
+
+function renderFindings(findings) {
+  const filtered = currentFilter === 'all' ? findings : findings.filter(f => f.category === currentFilter);
+  const order = {critical: 0, high: 1, medium: 2, low: 3, info: 4};
+  filtered.sort((a, b) => (order[a.severity] || 5) - (order[b.severity] || 5));
+
+  document.getElementById('findings').innerHTML = filtered.map(f => `
+    <div class="finding ${f.severity}">
+      <div class="f-header">
+        <span class="f-title">${esc(f.title)}</span>
+        <span class="f-badge">${f.severity}</span>
+      </div>
+      <div class="f-meta">${f.category} · ${f.analyzer} · ${esc(f.url)}</div>
+      <div class="f-desc">${esc(f.description)}</div>
+      ${f.evidence ? `<div class="f-evidence">${esc(f.evidence)}</div>` : ''}
+      ${f.recommendation ? `<div class="f-fix">→ ${esc(f.recommendation)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+// ── Scan History ───────────────────────────────────────────
+async function loadHistory() {
+  const container = document.getElementById('historyContent');
+  try {
+    const resp = await fetch('/api/v1/results');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const results = await resp.json();
+
+    if (!results.length) {
+      container.innerHTML = '<div class="empty-state">No saved scan results yet. Run a scan to see history here.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table class="history-table">
+        <thead><tr><th>Scan ID</th><th>Date</th><th>Target URL</th><th>Risk</th><th>Findings</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${results.map(r => {
+            const date = r.started_at ? new Date(r.started_at).toLocaleString() : '\u2014';
+            const rp = riskPillClass(r.risk_score || 0);
+            const scanId = r.scan_id || r.filename?.replace('.json','') || '\u2014';
+            return `
+              <tr>
+                <td><code style="font-size:0.85em;color:#7c3aed;cursor:pointer" onclick="loadResult('${esc(r.filename)}')" title="Click to view scan">${esc(scanId)}</code></td>
+                <td style="white-space:nowrap">${date}</td>
+                <td class="url-cell" title="${esc(r.target_url || '')}">${esc(r.target_url || '')}</td>
+                <td><span class="risk-pill ${rp}">${(r.risk_score || 0).toFixed(1)}</span></td>
+                <td>${r.total_findings || 0}</td>
+                <td>${esc(r.status || '')}</td>
+                <td><button class="load-btn" onclick="loadResult('${esc(r.filename)}')">View</button></td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Failed to load history: ${e.message}</div>`;
+  }
+}
+
+function riskPillClass(score) {
+  if (score >= 70) return 'risk-crit';
+  if (score >= 40) return 'risk-high';
+  if (score >= 10) return 'risk-med';
+  return 'risk-low';
+}
+
+async function loadResult(filename) {
+  try {
+    const resp = await fetch(`/api/v1/results/${filename}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    scanData = await resp.json();
+    switchTab('scanner');
+    renderResults(scanData);
+  } catch (e) { alert('Failed to load result: ' + e.message); }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// Load a scan result by scan_id — searches in-memory first, then persisted results
+async function loadScanById(scanId) {
+  if (!scanId || scanId === '—') return;
+  // Try in-memory first (current session)
+  try {
+    const resp = await fetch(`/api/v1/scan/${scanId}`);
+    if (resp.ok) {
+      scanData = await resp.json();
+      switchTab('scanner');
+      renderResults(scanData);
+      return;
+    }
+  } catch (e) { /* fall through */ }
+  // Search persisted results
+  try {
+    const resp = await fetch('/api/v1/results');
+    const results = await resp.json();
+    const match = results.find(r => r.scan_id === scanId);
+    if (match) {
+      await loadResult(match.filename);
+      return;
+    }
+  } catch (e) { /* fall through */ }
+  alert(`Scan ${scanId} not found in current session or history.`);
+}
+
+document.getElementById('targetUrl').addEventListener('keydown', e => { if (e.key === 'Enter') startScan(); });
+document.getElementById('pdfUrl').addEventListener('keydown', e => { if (e.key === 'Enter') startPdfScan(); });
+
+// ── Learned Rules ─────────────────────────────────────────
+let rulesFilter = 'all';
+let allRules = [];
+
+async function loadRules() {
+  const container = document.getElementById('rulesContent');
+  const statsEl = document.getElementById('rulesStats');
+  try {
+    const [rulesResp, statsResp] = await Promise.all([
+      fetch('/api/v1/rules'),
+      fetch('/api/v1/rules/stats'),
+    ]);
+    const rulesData = await rulesResp.json();
+    const stats = await statsResp.json();
+    allRules = rulesData.rules || [];
+
+    // Stats summary
+    statsEl.innerHTML = `
+      <div class="rules-summary">
+        <div class="card"><div class="label">Total</div><div class="value">${stats.total_rules}</div></div>
+        <div class="card"><div class="label">Candidates</div><div class="value" style="color:var(--yellow)">${stats.candidate || 0}</div></div>
+        <div class="card"><div class="label">Validated</div><div class="value" style="color:var(--accent2)">${stats.validated || 0}</div></div>
+        <div class="card"><div class="label">Active</div><div class="value" style="color:var(--green)">${stats.active || 0}</div></div>
+        <div class="card"><div class="label">Rejected</div><div class="value" style="color:var(--fg3)">${stats.rejected || 0}</div></div>
+        <div class="card"><div class="label">Avg Confidence</div><div class="value">${(stats.avg_confidence * 100).toFixed(0)}%</div></div>
+      </div>
+    `;
+
+    // Filter buttons
+    const filterEl = document.getElementById('rulesFilter');
+    const states = ['all', 'candidate', 'validated', 'active', 'rejected'];
+    filterEl.innerHTML = states.map(s => {
+      const count = s === 'all' ? allRules.length : allRules.filter(r => r.state === s).length;
+      return `<button class="${rulesFilter === s ? 'active' : ''}" onclick="setRulesFilter('${s}')">${s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)} (${count})</button>`;
+    }).join('');
+
+    renderRules();
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Failed to load rules: ${e.message}</div>`;
+  }
+}
+
+function setRulesFilter(f) {
+  rulesFilter = f;
+  document.querySelectorAll('#rulesFilter button').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase().startsWith(f === 'all' ? 'all' : f));
+  });
+  renderRules();
+}
+
+function renderRules() {
+  const container = document.getElementById('rulesContent');
+  const filtered = rulesFilter === 'all' ? allRules : allRules.filter(r => r.state === rulesFilter);
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="empty-state">No rules found. Run a scan with LLM Judge enabled to extract candidate rules.</div>';
+    return;
+  }
+
+  // Sort: candidates first, then active, then validated, then rejected
+  const stateOrder = { candidate: 0, validated: 1, active: 2, rejected: 3 };
+  filtered.sort((a, b) => (stateOrder[a.state] ?? 4) - (stateOrder[b.state] ?? 4));
+
+  container.innerHTML = filtered.map(r => {
+    const conf = (r.confidence_score * 100).toFixed(0);
+    const created = r.created_at ? new Date(r.created_at).toLocaleDateString() : '—';
+    const sevBadge = `<span class="f-badge" style="margin-left:6px;font-size:9px;padding:1px 6px;
+      background:${r.severity === 'critical' ? '#ef4444' : r.severity === 'high' ? '#f59e0b' : r.severity === 'medium' ? '#eab308' : '#3b82f6'};
+      color:${r.severity === 'high' || r.severity === 'medium' ? 'black' : 'white'}">${r.severity}</span>`;
+
+    let actions = '';
+    if (r.state === 'candidate' || r.state === 'validated') {
+      actions += `<button class="rule-btn-promote" onclick="promoteRule('${r.rule_id}','active')">Activate</button>`;
+      actions += `<button class="rule-btn-reject" onclick="rejectRule('${r.rule_id}')">Reject</button>`;
+    }
+    if (r.state === 'active') {
+      actions += `<button class="rule-btn-reject" onclick="rejectRule('${r.rule_id}')">Deactivate</button>`;
+    }
+    if (r.state === 'rejected') {
+      actions += `<button class="rule-btn-promote" onclick="promoteRule('${r.rule_id}','candidate')">Restore</button>`;
+    }
+    actions += `<button class="rule-btn-test" onclick="toggleDetail('${r.rule_id}')">Details</button>`;
+    actions += `<button class="rule-btn-delete" onclick="deleteRule('${r.rule_id}')">Delete</button>`;
+
+    const testCasesHtml = (r.test_cases || []).map(tc =>
+      `<div class="detail-row">${tc.should_match ? '✓' : '✗'} <code>${esc(tc.text.substring(0, 100))}</code></div>`
+    ).join('');
+
+    // Source URL — truncate for meta line, full in details
+    const srcUrl = r.source_url || '';
+    const srcUrlShort = srcUrl.length > 60 ? srcUrl.substring(0, 57) + '...' : srcUrl;
+    const srcUrlMeta = srcUrl ? ` · <a href="${esc(srcUrl)}" target="_blank" title="${esc(srcUrl)}" style="color:var(--fg3)">${esc(srcUrlShort)}</a>` : '';
+
+    // Created timestamp with time
+    const createdFull = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
+
+    // Confirmed scans list
+    const confirmedHtml = (r.confirmed_scan_ids || []).length > 0
+      ? `<div class="detail-row"><span class="detail-label">Confirmed in scans:</span> ${r.confirmed_scan_ids.map(s => `<code style="color:var(--accent2);cursor:pointer" onclick="loadScanById('${s}')">${s}</code>`).join(', ')}</div>`
+      : '';
+
+    return `
+      <div class="rule-card state-${r.state}" id="rule-${r.rule_id}">
+        <div class="rule-header">
+          <span class="rule-title">${esc(r.title)} ${sevBadge}</span>
+          <span class="state-badge ${r.state}">${r.state}</span>
+        </div>
+        <div class="rule-meta">${r.category} · confidence: ${conf}% · validations: ${r.validation_count} · scan: <code style="color:var(--accent2);cursor:pointer" onclick="loadScanById('${r.created_from_scan_id}')">${r.created_from_scan_id || '—'}</code> · ${created}${srcUrlMeta}</div>
+        <div class="rule-regex">${esc(r.regex_pattern)}</div>
+        <div class="rule-actions">${actions}</div>
+        <div class="rule-detail" id="detail-${r.rule_id}">
+          <div class="detail-row"><span class="detail-label">Description:</span> ${esc(r.description)}</div>
+          <div class="detail-row"><span class="detail-label">Rule ID:</span> <code>${r.rule_id}</code></div>
+          <div class="detail-row"><span class="detail-label">Source Scan:</span> <code style="color:var(--accent2);cursor:pointer" onclick="loadScanById('${r.created_from_scan_id}')">${r.created_from_scan_id || '—'}</code> — ${createdFull}</div>
+          ${srcUrl ? `<div class="detail-row"><span class="detail-label">Source Document:</span> <a href="${esc(srcUrl)}" target="_blank" style="color:var(--accent2)">${esc(srcUrl)}</a></div>` : ''}
+          ${r.source_finding_evidence ? `<div class="detail-row"><span class="detail-label">Evidence:</span> <code>${esc(r.source_finding_evidence.substring(0, 300))}</code></div>` : ''}
+          ${r.recommendation ? `<div class="detail-row"><span class="detail-label">Recommendation:</span> ${esc(r.recommendation)}</div>` : ''}
+          ${confirmedHtml}
+          ${r.last_confirmed_at ? `<div class="detail-row"><span class="detail-label">Last confirmed:</span> ${new Date(r.last_confirmed_at).toLocaleString()}</div>` : ''}
+          ${testCasesHtml ? `<div class="detail-row"><span class="detail-label">Test Cases:</span></div>${testCasesHtml}` : ''}
+          <div class="rule-test-input">
+            <input type="text" placeholder="Test regex against text..." id="test-input-${r.rule_id}">
+            <button class="rule-btn-test" onclick="testRule('${r.rule_id}')">Test</button>
+          </div>
+          <div class="rule-test-result" id="test-result-${r.rule_id}"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleDetail(ruleId) {
+  const el = document.getElementById('detail-' + ruleId);
+  if (el) el.classList.toggle('open');
+}
+
+async function promoteRule(ruleId, targetState) {
+  try {
+    const resp = await fetch(`/api/v1/rules/${ruleId}/promote`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ target_state: targetState }),
+    });
+    if (!resp.ok) { const e = await resp.json(); alert(e.detail || 'Failed'); return; }
+    loadRules();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function rejectRule(ruleId) {
+  try {
+    await fetch(`/api/v1/rules/${ruleId}/reject`, { method: 'POST' });
+    loadRules();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function deleteRule(ruleId) {
+  if (!confirm('Permanently delete this rule?')) return;
+  try {
+    await fetch(`/api/v1/rules/${ruleId}`, { method: 'DELETE' });
+    loadRules();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function testRule(ruleId) {
+  const input = document.getElementById('test-input-' + ruleId);
+  const resultEl = document.getElementById('test-result-' + ruleId);
+  if (!input.value.trim()) return;
+  try {
+    const resp = await fetch(`/api/v1/rules/${ruleId}/test`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ test_string: input.value }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      resultEl.innerHTML = `<span style="color:var(--red)">Error: ${esc(data.error)}</span>`;
+    } else if (data.matched) {
+      resultEl.innerHTML = `<span style="color:var(--green)">✓ Match: "${esc(data.match_text)}" at position ${data.match_start}-${data.match_end}</span>`;
+    } else {
+      resultEl.innerHTML = `<span style="color:var(--fg3)">✗ No match</span>`;
+    }
+  } catch (e) { resultEl.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`; }
+}
+
+// ── LLM Usage ─────────────────────────────────────────────
+function fmtTokens(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toString();
+}
+function fmtCost(c) { return '$' + c.toFixed(4); }
+function fmtDuration(ms) {
+  if (ms >= 60000) return (ms / 60000).toFixed(1) + 'm';
+  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
+  return Math.round(ms) + 'ms';
+}
+
+async function loadUsage() {
+  try {
+    const resp = await fetch('/api/v1/usage');
+    const data = await resp.json();
+
+    // Summary cards
+    document.getElementById('usageSummary').innerHTML = `
+      <div class="usage-summary">
+        <div class="card"><div class="label">API Calls</div><div class="value">${data.total_calls}</div></div>
+        <div class="card"><div class="label">Input Tokens</div><div class="value" style="color:var(--accent2)">${fmtTokens(data.total_input_tokens)}</div></div>
+        <div class="card"><div class="label">Output Tokens</div><div class="value" style="color:var(--purple)">${fmtTokens(data.total_output_tokens)}</div></div>
+        <div class="card"><div class="label">Total Tokens</div><div class="value">${fmtTokens(data.total_tokens)}</div></div>
+        <div class="card"><div class="label">Total Cost</div><div class="value cost-highlight">${fmtCost(data.total_cost_usd)}</div></div>
+        ${data.total_cache_read_tokens > 0 ? `<div class="card"><div class="label">Cache Reads</div><div class="value" style="color:var(--green)">${fmtTokens(data.total_cache_read_tokens)}</div></div>` : ''}
+      </div>
+    `;
+
+    // By Model
+    const models = Object.entries(data.by_model || {});
+    document.getElementById('usageByModel').innerHTML = models.length ? `
+      <div class="usage-section">
+        <h3>By Model</h3>
+        <table class="usage-table">
+          <thead><tr><th>Model</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+          <tbody>${models.map(([m, v]) => `
+            <tr>
+              <td style="color:var(--fg)">${esc(m)}</td>
+              <td>${v.calls}</td>
+              <td>${fmtTokens(v.input_tokens + v.output_tokens)}
+                <div class="token-bar" style="width:100px">
+                  <div class="input-fill" style="width:${v.input_tokens / (v.input_tokens + v.output_tokens) * 100}%"></div>
+                  <div class="output-fill" style="width:${v.output_tokens / (v.input_tokens + v.output_tokens) * 100}%"></div>
+                </div>
+              </td>
+              <td class="cost-highlight">${fmtCost(v.cost_usd)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    ` : '';
+
+    // By Purpose
+    const purposes = Object.entries(data.by_purpose || {});
+    document.getElementById('usageByPurpose').innerHTML = purposes.length ? `
+      <div class="usage-section">
+        <h3>By Purpose</h3>
+        <table class="usage-table">
+          <thead><tr><th>Purpose</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+          <tbody>${purposes.map(([p, v]) => `
+            <tr>
+              <td style="color:var(--fg)">${esc(p)}</td>
+              <td>${v.calls}</td>
+              <td>${fmtTokens(v.input_tokens + v.output_tokens)}</td>
+              <td class="cost-highlight">${fmtCost(v.cost_usd)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    ` : '';
+
+    // By Scan
+    const scans = Object.entries(data.by_scan || {});
+    document.getElementById('usageByScan').innerHTML = scans.length ? `
+      <div class="usage-section">
+        <h3>By Scan</h3>
+        <table class="usage-table">
+          <thead><tr><th>Scan ID</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr></thead>
+          <tbody>${scans.map(([s, v]) => `
+            <tr>
+              <td style="color:var(--fg);font-family:var(--font)">${esc(s)}</td>
+              <td>${v.calls}</td>
+              <td>${fmtTokens(v.input_tokens)}</td>
+              <td>${fmtTokens(v.output_tokens)}</td>
+              <td class="cost-highlight">${fmtCost(v.cost_usd)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    ` : '';
+
+    // Call log
+    const calls = (data.calls || []).slice().reverse(); // newest first
+    document.getElementById('usageLog').innerHTML = calls.length ? `
+      <div style="max-height:400px;overflow-y:auto;">
+        <table class="usage-table">
+          <thead><tr><th>Time</th><th>Purpose</th><th>Model</th><th>In</th><th>Out</th><th>Cost</th><th>Duration</th><th>Scan</th></tr></thead>
+          <tbody>${calls.map(c => `
+            <tr>
+              <td style="white-space:nowrap">${new Date(c.timestamp).toLocaleTimeString()}</td>
+              <td>${esc(c.purpose)}</td>
+              <td style="font-size:11px">${esc(c.model.replace('claude-', '').replace('-2025', ''))}</td>
+              <td>${fmtTokens(c.input_tokens)}</td>
+              <td>${fmtTokens(c.output_tokens)}</td>
+              <td class="cost-highlight">${fmtCost(c.cost_usd)}</td>
+              <td>${fmtDuration(c.duration_ms)}</td>
+              <td style="font-family:var(--font);font-size:11px">${esc(c.scan_id)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    ` : '<div class="empty-state">No LLM calls recorded yet. Run a scan with LLM Judge enabled.</div>';
+
+  } catch (e) {
+    document.getElementById('usageLog').innerHTML = `<div class="empty-state">Failed to load usage: ${e.message}</div>`;
+  }
+}
+
+async function resetUsage() {
+  if (!confirm('Reset all usage counters?')) return;
+  await fetch('/api/v1/usage/reset', { method: 'POST' });
+  loadUsage();
+}
+
+// ── Demo Mode ─────────────────────────────────────────────
+let demoWebScanId = null;
+let demoPdfScanId = null;
+let demoPollTimer = null;
+
+async function startDemo() {
+  const btn = document.getElementById('demoRunBtn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  document.getElementById('demoHint').textContent = '';
+  document.getElementById('demoStatus').classList.add('active');
+
+  // Reset status indicators
+  setDemoScanStatus('web', 'queued', 0, 'Starting...');
+  setDemoScanStatus('pdf', 'queued', 0, 'Starting...');
+
+  try {
+    const resp = await fetch('/api/v1/demo/run', { method: 'POST' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json();
+
+    demoWebScanId = data.website_scan_id;
+    demoPdfScanId = data.pdf_scan_id;
+
+    // Start polling both scans
+    demoPollTimer = setInterval(pollDemoScans, 1500);
+    setTimeout(pollDemoScans, 400);
+
+  } catch (e) {
+    document.getElementById('demoHint').textContent = `Error: ${e.message}`;
+    btn.disabled = false;
+    btn.textContent = 'Run Demo Scans';
+  }
+}
+
+function setDemoScanStatus(type, status, progressPct, info) {
+  const prefix = type === 'web' ? 'demoWeb' : 'demoPdf';
+  const statusEl = document.getElementById(prefix + 'Status');
+  const progressEl = document.getElementById(prefix + 'Progress');
+  const infoEl = document.getElementById(prefix + 'Info');
+
+  statusEl.textContent = status;
+  statusEl.className = 'demo-scan-status';
+  if (status === 'completed') statusEl.classList.add('completed');
+  else if (status.startsWith('failed')) statusEl.classList.add('failed');
+  else if (status === 'queued') statusEl.classList.add('queued');
+  else statusEl.classList.add('running');
+
+  progressEl.style.width = progressPct + '%';
+  if (info !== undefined) infoEl.textContent = info;
+}
+
+async function pollDemoScans() {
+  let webDone = false, pdfDone = false;
+
+  const statusLabels = {
+    queued: 'Queued', crawling: 'Crawling...', downloading_pdf: 'Downloading...',
+    analyzing: 'Analyzing...', analyzing_pdf: 'Analyzing PDF...', llm_analysis: 'AI Analysis...',
+    learning_rules: 'Learning rules...', completed: 'Done!',
+  };
+
+  if (demoWebScanId) {
+    try {
+      const resp = await fetch(`/api/v1/scan/${demoWebScanId}`);
+      const data = await resp.json();
+      const s = data.status || 'unknown';
+      const pct = PHASE_PCT[s] || 10;
+      const label = statusLabels[s] || s;
+      const extra = s === 'completed' ? `${data.summary?.total_findings || 0} findings` : '';
+      setDemoScanStatus('web', s === 'completed' ? 'completed' : s.startsWith('failed') ? s : label, pct, extra || label);
+      webDone = s === 'completed' || s.startsWith('failed');
+    } catch (e) { /* keep polling */ }
+  }
+
+  if (demoPdfScanId) {
+    try {
+      const resp = await fetch(`/api/v1/scan/${demoPdfScanId}`);
+      const data = await resp.json();
+      const s = data.status || 'unknown';
+      const pct = PHASE_PCT[s] || 10;
+      const label = statusLabels[s] || s;
+      const extra = s === 'completed' ? `${data.summary?.total_findings || 0} findings` : '';
+      setDemoScanStatus('pdf', s === 'completed' ? 'completed' : s.startsWith('failed') ? s : label, pct, extra || label);
+      pdfDone = s === 'completed' || s.startsWith('failed');
+    } catch (e) { /* keep polling */ }
+  }
+
+  if (webDone && pdfDone) {
+    clearInterval(demoPollTimer);
+    demoPollTimer = null;
+    const btn = document.getElementById('demoRunBtn');
+    btn.disabled = false;
+    btn.textContent = 'Run Demo Scans';
+    document.getElementById('demoHint').textContent = 'Demo complete! Check candidate rules below.';
+    // Reload rules to show newly extracted candidates
+    setTimeout(loadRules, 500);
+  }
+}
+</script>
+</body>
+</html>

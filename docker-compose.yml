@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  aasa:
+    build: .
+    container_name: aasa
+    ports:
+      - "6001:6001"
+    volumes:
+      - ./results:/app/results
+    environment:
+      - AASA_DEBUG=false
+      - AASA_HOST=0.0.0.0
+      - AASA_PORT=6001
+      - AASA_RESULTS_DIR=/app/results
+      # Set your Anthropic API key for LLM-as-judge analysis
+      # Without this, only static analysis is available
+      - AASA_ANTHROPIC_API_KEY=${AASA_ANTHROPIC_API_KEY:-}
+      - AASA_LLM_MODEL=${AASA_LLM_MODEL:-claude-sonnet-4-5-20250929}
+      - AASA_LLM_JUDGE_ENABLED=${AASA_LLM_JUDGE_ENABLED:-true}
+      - AASA_MAX_DEPTH=${AASA_MAX_DEPTH:-2}
+      - AASA_MAX_PAGES=${AASA_MAX_PAGES:-50}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6001/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

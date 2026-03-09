@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aasa-config
+  namespace: aasa
+  labels:
+    app.kubernetes.io/name: aasa
+    app.kubernetes.io/component: config
+data:
+  # Server
+  AASA_HOST: "0.0.0.0"
+  AASA_PORT: "6001"
+  AASA_DEBUG: "false"
+
+  # Storage
+  AASA_RESULTS_DIR: "/app/results"
+
+  # LLM Judge
+  AASA_LLM_MODEL: "claude-sonnet-4-5-20250929"
+  AASA_LLM_JUDGE_ENABLED: "true"
+  AASA_LLM_MAX_TOKENS: "4096"
+
+  # Crawler
+  AASA_MAX_DEPTH: "2"
+  AASA_MAX_PAGES: "50"
+  AASA_REQUEST_TIMEOUT: "15"
+  AASA_CONCURRENT_REQUESTS: "5"
+
+  # Rule Learning
+  AASA_RULE_LEARNING_ENABLED: "true"
+  AASA_RULE_AUTO_PROMOTE_THRESHOLD: "0"
+  AASA_RULE_MIN_CONFIDENCE: "0.7"

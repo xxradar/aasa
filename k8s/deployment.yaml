@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aasa
+  namespace: aasa
+  labels:
+    app.kubernetes.io/name: aasa
+    app.kubernetes.io/component: server
+spec:
+  replicas: 1          # Single replica — PVC is RWO and scan state is in-memory
+  strategy:
+    type: Recreate     # Recreate ensures PVC is released before new pod starts
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aasa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aasa
+        app.kubernetes.io/component: server
+    spec:
+      # Match the non-root 'aasa' user created in the Dockerfile
+      # UID/GID 999 matches the 'aasa' user created in the Dockerfile
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+
+      containers:
+        - name: aasa
+          image: aasa:latest        # Replace with your registry, e.g. ghcr.io/yourorg/aasa:v0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 6001
+              protocol: TCP
+
+          # Environment: non-secret config from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: aasa-config
+
+          # Environment: secret values
+          env:
+            - name: AASA_ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aasa-secret
+                  key: AASA_ANTHROPIC_API_KEY
+
+          # Persistent storage for scan results, learned rules, and LLM usage
+          volumeMounts:
+            - name: results
+              mountPath: /app/results
+
+          # Probes
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 10
+
+          # Resource management
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: aasa-results
+
+      # Optional: pull from a private registry
+      # imagePullSecrets:
+      #   - name: registry-credentials
+
+      terminationGracePeriodSeconds: 30

@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Results (runtime data, persisted on PV)
+results/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

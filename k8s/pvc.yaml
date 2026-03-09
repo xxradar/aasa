@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aasa-results
+  namespace: aasa
+  labels:
+    app.kubernetes.io/name: aasa
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment and set if you need a specific StorageClass:
+  # storageClassName: standard

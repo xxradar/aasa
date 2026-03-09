@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aasa
+  labels:
+    app.kubernetes.io/name: aasa
+    app.kubernetes.io/part-of: aasa
