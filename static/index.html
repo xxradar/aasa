@@ -255,6 +255,7 @@
         <label>Max Pages: <input type="number" id="maxPages" value="50" min="1" max="500"></label>
         <label><input type="checkbox" id="llmJudge" checked> LLM Judge</label>
         <label><input type="checkbox" id="staticOnly"> Static Only</label>
+        <label><input type="checkbox" id="excludeImages"> Exclude Images</label>
       </div>
     </div>
 
@@ -354,7 +355,7 @@
   </div>
 
   <div class="footer">
-    KUBIOSEC SENTINEL v0.1.0 — <a href="/openapi.json" target="_blank">OpenAPI Spec</a> | <a href="/docs" target="_blank">Swagger</a> | <a href="/redoc" target="_blank">ReDoc</a>
+    KUBIOSEC SENTINEL v0.1.0 — <a href="/openapi.json" target="_blank">OpenAPI Spec</a> | <a href="/docs" target="_blank">API Docs</a>
   </div>
 </div>
 
@@ -474,6 +475,7 @@ async function startScan() {
       max_pages: parseInt(document.getElementById('maxPages').value),
       enable_llm_judge: document.getElementById('llmJudge').checked,
       static_only: document.getElementById('staticOnly').checked,
+      exclude_images: document.getElementById('excludeImages').checked,
     };
 
     const resp = await fetch('/api/v1/scan', {
