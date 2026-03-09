@@ -19,16 +19,23 @@ logger = logging.getLogger(__name__)
 class Crawler:
     """Async crawler that discovers pages and collects raw content for analysis."""
 
+    IMAGE_EXTENSIONS = frozenset((
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+        ".bmp", ".tiff", ".tif", ".avif",
+    ))
+
     def __init__(
         self,
         base_url: str,
         max_depth: int | None = None,
         max_pages: int | None = None,
+        exclude_images: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
         self.base_domain = urlparse(base_url).netloc
         self.max_depth = max_depth or settings.max_depth
         self.max_pages = max_pages or settings.max_pages
+        self.exclude_images = exclude_images
         self.visited: set[str] = set()
         self.pages: list[CrawledPage] = []
         self.page_contents: dict[str, str] = {}  # url -> raw HTML
@@ -64,6 +71,13 @@ class Crawler:
         if depth > self.max_depth:
             return
 
+        # Skip image URLs if exclude_images is enabled
+        if self.exclude_images:
+            path_lower = urlparse(normalized).path.lower()
+            if any(path_lower.endswith(ext) for ext in self.IMAGE_EXTENSIONS):
+                logger.debug(f"Skipping image: {normalized}")
+                return
+
         self.visited.add(normalized)
         logger.info(f"Crawling [{depth}] {normalized}")
 
@@ -79,6 +93,12 @@ class Crawler:
             return
 
         content_type = resp.headers.get("content-type", "")
+
+        # Skip image responses when exclude_images is enabled
+        if self.exclude_images and content_type.startswith("image/"):
+            logger.debug(f"Skipping image content-type: {normalized}")
+            return
+
         page = CrawledPage(
             url=normalized,
             status_code=resp.status_code,

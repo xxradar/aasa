@@ -74,6 +74,7 @@ class ScanRequest(BaseModel):
     max_pages: int = Field(default=50, ge=1, le=500, description="Max pages to crawl")
     enable_llm_judge: bool = Field(default=True, description="Enable LLM-as-judge analysis")
     static_only: bool = Field(default=False, description="Skip LLM analysis, static rules only")
+    exclude_images: bool = Field(default=False, description="Skip image URLs during crawl")
 
 
 class ScanSummary(BaseModel):

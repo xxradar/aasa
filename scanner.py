@@ -66,6 +66,7 @@ class Scanner:
             base_url=request.url,
             max_depth=request.max_depth,
             max_pages=request.max_pages,
+            exclude_images=request.exclude_images,
         )
         agentic_scanner = AgenticSignalScanner(request.url)
 
