@@ -155,6 +155,11 @@ class Crawler:
             if parsed.netloc != self.base_domain and not is_pdf:
                 continue
 
+            # Skip image links when exclude_images is enabled
+            if self.exclude_images:
+                if any(parsed.path.lower().endswith(ext) for ext in self.IMAGE_EXTENSIONS):
+                    continue
+
             # Skip non-http
             if parsed.scheme not in ("http", "https"):
                 continue
