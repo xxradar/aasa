@@ -15,6 +15,14 @@ class ExfiltrationAnalyzer(BaseAnalyzer):
     name = "exfiltration"
     description = "Detects image-based, link-based, and email-based data exfiltration patterns"
 
+    # Known-benign CDN / image-processing query parameter names
+    SAFE_IMAGE_PARAMS = frozenset((
+        "w", "h", "width", "height", "fit", "crop", "resize", "dpr",
+        "auto", "format", "fm", "q", "quality", "n", "s", "sig",
+        "blur", "sharp", "orient", "flip", "rot", "bg",
+        "v", "ver", "t", "ts", "cb", "hash", "etag", "max", "min",
+    ))
+
     # Patterns for exfiltration via image/link URLs
     EXFIL_URL_PATTERNS = [
         # Markdown image with dynamic parameter placeholder
@@ -93,6 +101,12 @@ class ExfiltrationAnalyzer(BaseAnalyzer):
         findings = []
         target_domain = urlparse(url).netloc
 
+        # Words that strongly indicate exfiltration intent
+        SUSPICIOUS_WORDS = [
+            "data", "query", "input", "msg", "text",
+            "content", "payload", "user", "secret",
+        ]
+
         for img in soup.find_all("img"):
             src = img.get("src", "")
             if not src:
@@ -102,14 +116,22 @@ class ExfiltrationAnalyzer(BaseAnalyzer):
             # External domain image with query parameters
             if parsed.netloc and parsed.netloc != target_domain and parsed.query:
                 params = parse_qs(parsed.query)
+                param_keys = {k.lower() for k in params}
+
+                # If ALL params are known-safe CDN params → skip entirely
+                if param_keys <= self.SAFE_IMAGE_PARAMS:
+                    continue
+
+                # Filter out safe params, check remainder
+                non_safe = param_keys - self.SAFE_IMAGE_PARAMS
+
                 suspicious_params = [
-                    k for k in params
-                    if any(s in k.lower() for s in [
-                        "data", "q", "query", "input", "msg", "text",
-                        "content", "payload", "user", "secret",
-                    ])
+                    k for k in non_safe
+                    if any(s in k for s in SUSPICIOUS_WORDS)
                 ]
+
                 if suspicious_params:
+                    # Truly suspicious → HIGH severity
                     findings.append(Finding(
                         category=FindingCategory.exfiltration,
                         severity=Severity.high,
@@ -122,6 +144,21 @@ class ExfiltrationAnalyzer(BaseAnalyzer):
                         url=url,
                         analyzer=self.name,
                         recommendation="Review external image URLs for potential data exfiltration.",
+                    ))
+                else:
+                    # Unknown params (not safe, not suspicious) → INFO severity
+                    findings.append(Finding(
+                        category=FindingCategory.exfiltration,
+                        severity=Severity.info,
+                        title="External image with unrecognized query parameters",
+                        description=(
+                            f"Image loads from external domain '{parsed.netloc}' "
+                            f"with unrecognized parameters: {list(non_safe)}"
+                        ),
+                        evidence=src[:300],
+                        url=url,
+                        analyzer=self.name,
+                        recommendation="Verify these image URL parameters are benign.",
                     ))
 
         return findings
