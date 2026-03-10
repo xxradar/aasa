@@ -56,6 +56,21 @@ class Settings(BaseSettings):
     rule_min_confidence: float = 0.7
     rules_dir: str = "/app/results"  # Where learned_rules.json lives
 
+    # Authentication
+    auth_enabled: bool = True
+    secret_key: str = "change-me-in-production-use-a-real-secret"  # JWT + session signing
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440  # 24 hours
+
+    # OAuth providers (set via env vars AASA_GITHUB_CLIENT_ID etc.)
+    github_client_id: Optional[str] = None
+    github_client_secret: Optional[str] = None
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+
+    # SQLite user database path
+    auth_db_path: str = "/app/results/users.db"
+
     model_config = {"env_prefix": "AASA_", "env_file": ".env"}
 
 
