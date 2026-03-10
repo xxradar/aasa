@@ -391,6 +391,16 @@ function setScanType(type) {
 }
 
 // ── Async Polling ──────────────────────────────────────────
+function clearResults() {
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('summary').innerHTML = '';
+  document.getElementById('findings').innerHTML = '';
+  document.getElementById('agenticFiles').innerHTML = '';
+  const llm = document.getElementById('llmSummary');
+  llm.innerHTML = '';
+  llm.classList.add('hidden');
+}
+
 function showStatus(text, phase) {
   const el = document.getElementById('status');
   el.classList.add('active');
@@ -471,7 +481,7 @@ async function startScan() {
   const btn = document.getElementById('scanBtn');
   btn.disabled = true;
   btn.textContent = 'Scanning...';
-  document.getElementById('results').classList.add('hidden');
+  clearResults();
 
   try {
     const body = {
@@ -508,7 +518,7 @@ async function startPdfScan() {
   const btn = document.getElementById('pdfScanBtn');
   btn.disabled = true;
   btn.textContent = 'Analyzing...';
-  document.getElementById('results').classList.add('hidden');
+  clearResults();
 
   try {
     const body = {
