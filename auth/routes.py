@@ -14,7 +14,16 @@ from .models import UserLogin, UserCreate, TokenResponse
 from .jwt import create_access_token
 
 logger = logging.getLogger(__name__)
+auth_log = logging.getLogger("auth.events")
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _client_ip(request: Request) -> str:
+    """Get client IP, respecting X-Forwarded-For behind a proxy."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _set_token_cookie(response: Response, token: str):
@@ -32,7 +41,7 @@ def _set_token_cookie(response: Response, token: str):
 # ── Email / Password ────────────────────────────────────────────────
 
 @auth_router.post("/register")
-async def register(data: UserCreate):
+async def register(data: UserCreate, request: Request):
     """Register a new local account."""
     db = get_db()
     if db.get_by_email(data.email):
@@ -40,6 +49,8 @@ async def register(data: UserCreate):
 
     user = db.create_local(data.email, data.password, data.name)
     token = create_access_token(user.id, user.email)
+
+    auth_log.info("REGISTER provider=local email=%s ip=%s", user.email, _client_ip(request))
 
     response = JSONResponse(content={
         "access_token": token,
@@ -51,14 +62,17 @@ async def register(data: UserCreate):
 
 
 @auth_router.post("/login")
-async def login(data: UserLogin):
+async def login(data: UserLogin, request: Request):
     """Login with email and password."""
     db = get_db()
     user = db.verify_password(data.email, data.password)
     if not user:
+        auth_log.warning("LOGIN_FAILED provider=local email=%s ip=%s", data.email, _client_ip(request))
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     token = create_access_token(user.id, user.email)
+
+    auth_log.info("LOGIN provider=local email=%s ip=%s", user.email, _client_ip(request))
 
     response = JSONResponse(content={
         "access_token": token,
@@ -70,8 +84,12 @@ async def login(data: UserLogin):
 
 
 @auth_router.post("/logout")
-async def logout():
+async def logout(request: Request):
     """Clear the auth cookie."""
+    from .dependencies import get_current_user
+    user = get_current_user(request)
+    if user:
+        auth_log.info("LOGOUT email=%s ip=%s", user.email, _client_ip(request))
     response = JSONResponse(content={"status": "logged_out"})
     response.delete_cookie("access_token")
     return response
@@ -164,6 +182,8 @@ async def github_callback(request: Request, code: str = None, error: str = None)
         avatar_url=gh_user.get("avatar_url"),
     )
 
+    auth_log.info("LOGIN provider=github email=%s ip=%s", email, _client_ip(request))
+
     jwt_token = create_access_token(user.id, user.email)
     response = RedirectResponse("/")
     _set_token_cookie(response, jwt_token)
@@ -236,6 +256,8 @@ async def google_callback(request: Request, code: str = None, error: str = None)
         name=g_user.get("name"),
         avatar_url=g_user.get("picture"),
     )
+
+    auth_log.info("LOGIN provider=google email=%s ip=%s", email, _client_ip(request))
 
     jwt_token = create_access_token(user.id, user.email)
     response = RedirectResponse("/")
