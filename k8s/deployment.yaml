@@ -36,18 +36,15 @@ spec:
               containerPort: 6001
               protocol: TCP
 
-          # Environment: non-secret config from ConfigMap
+          # Environment: non-secret config from ConfigMap, secrets for API key + auth
           envFrom:
             - configMapRef:
                 name: aasa-config
-
-          # Environment: secret values
-          env:
-            - name: AASA_ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: aasa-secret
-                  key: AASA_ANTHROPIC_API_KEY
+            - secretRef:
+                name: aasa-secret       # AASA_ANTHROPIC_API_KEY
+            - secretRef:
+                name: aasa-auth         # SECRET_KEY, GitHub/Google OAuth creds
+                optional: true          # auth secret is optional — app works without it
 
           # Persistent storage for scan results, learned rules, and LLM usage
           volumeMounts:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import logging
+import os
+from logging.handlers import RotatingFileHandler
 from urllib.parse import urlencode
 
 import httpx
@@ -15,6 +17,14 @@ from .jwt import create_access_token
 
 logger = logging.getLogger(__name__)
 auth_log = logging.getLogger("auth.events")
+
+# ── Persist auth events to file on PVC ─────────────────────────────
+_log_path = os.path.join(os.path.dirname(settings.auth_db_path), "auth.log")
+_file_handler = RotatingFileHandler(_log_path, maxBytes=5_000_000, backupCount=3)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+auth_log.addHandler(_file_handler)
+auth_log.setLevel(logging.INFO)
+
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
