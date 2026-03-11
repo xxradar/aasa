@@ -34,6 +34,15 @@ class PDFScanRequest(BaseModel):
     enable_llm_judge: bool = Field(default=False, description="Enable LLM-as-judge analysis on extracted PDF text")
 
 
+class APIScanRequest(BaseModel):
+    """Request to scan for API endpoints."""
+    url: str = Field(..., description="Base URL to probe for API endpoints")
+    probe_endpoints: bool = Field(
+        default=False,
+        description="If true, also probe individual endpoints found in OpenAPI/Swagger specs",
+    )
+
+
 class PromoteRequest(BaseModel):
     """Request to promote a rule to a new state."""
     target_state: str = Field(..., description="Target state: 'validated', 'active', or 'rejected'")
@@ -211,6 +220,46 @@ async def scan_pdf_sync(request: PDFScanRequest):
     except Exception as e:
         logger.exception(f"PDF scan failed: {e}")
         raise HTTPException(status_code=500, detail=f"PDF scan failed: {str(e)}")
+
+
+@router.post(
+    "/scan/api",
+    summary="Start an API discovery scan (async)",
+    tags=["scanning"],
+    description=(
+        "Probe a target URL for well-known API endpoints (OpenAPI, Swagger, "
+        "GraphQL, actuator, admin, debug, health, etc.). Returns scan_id immediately. "
+        "Poll GET /scan/{scan_id} for results. Enable probe_endpoints to also test "
+        "individual API endpoints discovered in specs for unauthenticated access."
+    ),
+)
+async def scan_api(request: APIScanRequest):
+    """Start a non-blocking API discovery scan."""
+    import uuid
+    from datetime import datetime, timezone
+    scan_id = str(uuid.uuid4())[:8]
+
+    result = ScanResult(
+        scan_id=scan_id,
+        target_url=request.url,
+        started_at=datetime.now(timezone.utc),
+        status="queued",
+    )
+    scans[scan_id] = result
+
+    async def _run():
+        try:
+            await scanner.scan_api(
+                request.url,
+                probe_endpoints=request.probe_endpoints,
+                result=result,
+            )
+        except Exception as e:
+            logger.exception(f"API scan {scan_id} failed: {e}")
+            result.status = f"failed: {e}"
+
+    asyncio.create_task(_run())
+    return {"scan_id": scan_id, "status": "queued", "target_url": request.url}
 
 
 @router.get(

@@ -17,7 +17,7 @@ from config import settings
 from models import (
     ScanRequest, ScanResult, ScanSummary, CrawledPage, Finding, Severity,
 )
-from crawler import Crawler, AgenticSignalScanner
+from crawler import Crawler, AgenticSignalScanner, APIDiscoveryScanner
 from analyzers import ALL_STATIC_ANALYZERS, PDFAnalyzer, LLMJudgeAnalyzer, LearnedRuleAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -69,11 +69,13 @@ class Scanner:
             exclude_images=request.exclude_images,
         )
         agentic_scanner = AgenticSignalScanner(request.url)
+        api_scanner = APIDiscoveryScanner(request.url)
 
-        # Run crawl and agentic file scan concurrently
-        pages, agentic_files = await asyncio.gather(
+        # Run crawl, agentic file scan, and API discovery concurrently
+        pages, agentic_files, (api_endpoints, api_findings) = await asyncio.gather(
             crawler.crawl(),
             agentic_scanner.scan(),
+            api_scanner.discover(probe_endpoints=False),
         )
 
         result.pages = pages
@@ -83,7 +85,8 @@ class Scanner:
         logger.info(
             f"[{scan_id}] Crawled {len(pages)} pages, "
             f"found {len(agentic_files)} agentic files, "
-            f"{len(crawler.pdf_contents)} PDFs"
+            f"{len(crawler.pdf_contents)} PDFs, "
+            f"{len(api_endpoints)} API endpoints"
         )
 
         # ── Phase 2: Static Analysis ──────────────────────────────────
@@ -94,6 +97,11 @@ class Scanner:
             self._run_static_analysis, scan_id, pages, agentic_files,
             crawler.page_contents, crawler.pdf_contents,
         )
+
+        # Merge API discovery findings from Phase 1
+        if api_findings:
+            all_findings.extend(api_findings)
+            logger.info(f"[{scan_id}] API discovery: {len(api_findings)} findings from {len(api_endpoints)} endpoints")
 
         # ── Phase 3: LLM Judge (optional) ─────────────────────────────
         if request.enable_llm_judge and not request.static_only and self.llm_judge.available:
@@ -178,6 +186,63 @@ class Scanner:
         # ── Phase 5: Persist results to disk ──────────────────────────
         self._save_results(result)
 
+        return result
+
+    async def scan_api(
+        self,
+        base_url: str,
+        probe_endpoints: bool = False,
+        result: ScanResult | None = None,
+    ) -> ScanResult:
+        """Run a dedicated API discovery scan.
+
+        Args:
+            base_url: Target URL to probe for API endpoints.
+            probe_endpoints: If True, also probe individual endpoints
+                             found in OpenAPI/Swagger specs.
+            result: Optional pre-created ScanResult for live status tracking.
+        """
+        scan_id = result.scan_id if result else str(uuid.uuid4())[:8]
+        if result is None:
+            result = ScanResult(
+                scan_id=scan_id,
+                target_url=base_url,
+                started_at=datetime.now(timezone.utc),
+            )
+        result.status = "discovering_apis"
+
+        logger.info(f"[{scan_id}] API scan: probing {base_url} (probe_endpoints={probe_endpoints})")
+
+        api_scanner = APIDiscoveryScanner(base_url)
+        endpoints, findings = await api_scanner.discover(probe_endpoints=probe_endpoints)
+
+        logger.info(
+            f"[{scan_id}] API scan: {len(endpoints)} endpoints discovered, "
+            f"{len(findings)} findings"
+        )
+
+        # Build a summary page to hold findings
+        page = CrawledPage(
+            url=base_url,
+            status_code=200,
+            content_type="text/html",
+            title=f"[API Scan] {base_url}",
+            depth=0,
+            findings=findings,
+        )
+        result.pages = [page]
+        result.findings = self._dedup_findings(findings)
+        result.summary = self._compute_summary(result.findings, [], 0)
+        result.completed_at = datetime.now(timezone.utc)
+        result.status = "completed"
+
+        logger.info(
+            f"[{scan_id}] API scan complete — "
+            f"Risk score: {result.summary.risk_score:.1f}/100, "
+            f"{result.summary.total_findings} findings"
+        )
+
+        self._save_results(result)
         return result
 
     async def scan_pdf_url(

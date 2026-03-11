@@ -68,6 +68,7 @@
     cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: bold; transition: all 0.2s;
   }
   .scan-type-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .scan-type-btn:not(:first-child):not(:last-child) { border-radius: 0; }
   .scan-type-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
   .scan-type-btn.active { background: var(--accent); color: #0a0e14; border-color: var(--accent); font-weight: bold; }
   .scan-type-btn:hover:not(.active) { background: #374151; }
@@ -247,6 +248,7 @@
     <div class="scan-type-switch">
       <button class="scan-type-btn active" onclick="setScanType('website')">Website Scan</button>
       <button class="scan-type-btn" onclick="setScanType('pdf')">PDF Scan</button>
+      <button class="scan-type-btn" onclick="setScanType('api')">API Scan</button>
     </div>
 
     <!-- Website form -->
@@ -274,6 +276,21 @@
         <label><input type="checkbox" id="pdfLlmJudge"> AI Analysis (LLM Judge on extracted text)</label>
         <p style="color: var(--fg3); font-size: 11px; margin-left: 8px;">
           Static: hidden text, metadata, annotations, form fields, JS, XMP. AI: semantic injection, social engineering, context manipulation.
+        </p>
+      </div>
+    </div>
+
+    <!-- API form -->
+    <div id="apiForm" class="hidden">
+      <div class="scan-form">
+        <input type="url" id="apiUrl" placeholder="https://target-api.com">
+        <button class="btn" id="apiScanBtn" style="background:#a855f7;" onclick="startApiScan()">Scan API</button>
+      </div>
+      <div class="options">
+        <label><input type="checkbox" id="probeEndpoints"> Probe discovered endpoints (active scanning)</label>
+        <p style="color: var(--fg3); font-size: 11px; margin-left: 8px;">
+          Probes ~60 well-known paths: OpenAPI, Swagger, GraphQL, actuator, admin, debug, health, metrics.
+          Enable "Probe endpoints" to test individual API endpoints from discovered specs for unauthenticated access.
         </p>
       </div>
     </div>
@@ -370,7 +387,7 @@ let scanData = null;
 let scanType = 'website';
 let pollTimer = null;
 
-const PHASE_PCT = { queued: 5, crawling: 15, downloading_pdf: 15, analyzing: 40, analyzing_pdf: 40, llm_analysis: 70, learning_rules: 85, completed: 100 };
+const PHASE_PCT = { queued: 5, crawling: 15, downloading_pdf: 15, discovering_apis: 30, analyzing: 40, analyzing_pdf: 40, llm_analysis: 70, learning_rules: 85, completed: 100 };
 
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -388,6 +405,7 @@ function setScanType(type) {
   document.querySelector(`.scan-type-btn[onclick*="${type}"]`).classList.add('active');
   document.getElementById('websiteForm').classList.toggle('hidden', type !== 'website');
   document.getElementById('pdfForm').classList.toggle('hidden', type !== 'pdf');
+  document.getElementById('apiForm').classList.toggle('hidden', type !== 'api');
 }
 
 // ── Async Polling ──────────────────────────────────────────
@@ -434,6 +452,7 @@ async function pollScan(scanId, btn, btnLabel) {
         queued: 'Queued...',
         crawling: 'Crawling pages...',
         downloading_pdf: 'Downloading PDF...',
+        discovering_apis: 'Probing API endpoints...',
         analyzing: 'Running static analyzers...',
         analyzing_pdf: 'Analyzing PDF layers...',
         llm_analysis: 'Running AI analysis (LLM Judge)...',
@@ -540,6 +559,39 @@ async function startPdfScan() {
     showStatus(`Error: ${e.message}`, 'queued');
     btn.disabled = false;
     btn.textContent = 'Scan PDF';
+  }
+}
+
+// ── API Scan (non-blocking) ────────────────────────────────
+async function startApiScan() {
+  const url = document.getElementById('apiUrl').value.trim();
+  if (!url) return;
+
+  const btn = document.getElementById('apiScanBtn');
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  clearResults();
+
+  try {
+    const body = {
+      url,
+      probe_endpoints: document.getElementById('probeEndpoints').checked,
+    };
+
+    const resp = await fetch('/api/v1/scan/api', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const { scan_id } = await resp.json();
+    pollScan(scan_id, btn, 'Scan API');
+
+  } catch (e) {
+    showStatus(`Error: ${e.message}`, 'queued');
+    btn.disabled = false;
+    btn.textContent = 'Scan API';
   }
 }
 

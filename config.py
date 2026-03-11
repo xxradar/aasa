@@ -36,6 +36,46 @@ class Settings(BaseSettings):
         "system_prompt.txt", "system-prompt.md",
     ]
 
+    # Well-known API documentation / spec endpoints (probed during website scan)
+    api_discovery_paths: list[str] = [
+        # OpenAPI / Swagger
+        "openapi.json", "openapi.yaml", "openapi.yml",
+        "swagger.json", "swagger.yaml", "swagger.yml",
+        "api-docs", "api-docs.json",
+        "docs", "docs/openapi.json",
+        "redoc",
+        "swagger-ui", "swagger-ui/index.html", "swagger-ui.html",
+        "v1/openapi.json", "v2/openapi.json", "v3/openapi.json",
+        "api/openapi.json", "api/swagger.json",
+        "api/v1/openapi.json", "api/v1/swagger.json",
+        "api/v2/openapi.json", "api/v2/swagger.json",
+        ".well-known/openapi.yaml",
+        # GraphQL
+        "graphql", "graphiql", "playground",
+        "api/graphql", "v1/graphql",
+        # Generic API paths
+        "api", "api/", "api/v1", "api/v2", "api/v3",
+        "api/v1/", "api/v2/", "api/v3/",
+        # Health / status / metadata
+        "api/health", "api/v1/health",
+        "health", "healthz", "readyz",
+        "status", "api/status",
+        "_health", "_status",
+        # Other specs
+        "api/schema", "schema", "schema.json",
+        "api-spec", "api-spec.json",
+        "wadl", "api.wadl",
+        # Admin / debug endpoints
+        "admin", "admin/", "_admin",
+        "debug", "debug/", "_debug",
+        "metrics", "prometheus/metrics",
+        "actuator", "actuator/health", "actuator/info", "actuator/env",
+        # gRPC
+        "grpc/reflection",
+        # Websocket
+        "ws", "websocket", "api/ws",
+    ]
+
     # LLM Judge
     anthropic_api_key: Optional[str] = None
     llm_model: str = "claude-sonnet-4-5-20250929"
