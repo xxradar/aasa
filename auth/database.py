@@ -109,6 +109,20 @@ class UserDB:
             )
         return self.get_by_id(cursor.lastrowid)
 
+    def get_all(self) -> list[User]:
+        """Return all registered users."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM users ORDER BY id"
+            ).fetchall()
+        return [self._row_to_user(r) for r in rows]
+
+    def delete(self, user_id: int) -> bool:
+        """Delete a user by ID. Returns True if a row was removed."""
+        with self._conn() as conn:
+            cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cursor.rowcount > 0
+
     def verify_password(self, email: str, password: str) -> Optional[User]:
         with self._conn() as conn:
             row = conn.execute(

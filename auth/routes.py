@@ -115,6 +115,48 @@ async def me(request: Request):
     return user.model_dump()
 
 
+# ── User Management ────────────────────────────────────────────────
+
+@auth_router.get("/users")
+async def list_users(request: Request):
+    """List all registered users (requires authentication)."""
+    from .dependencies import require_auth
+    caller = require_auth(request)
+
+    db = get_db()
+    users = db.get_all()
+
+    auth_log.info("LIST_USERS by=%s ip=%s count=%d", caller.email, _client_ip(request), len(users))
+
+    return {
+        "total": len(users),
+        "users": [u.model_dump() for u in users],
+    }
+
+
+@auth_router.delete("/users/{user_id}")
+async def delete_user(user_id: int, request: Request):
+    """Delete a user by ID (requires authentication, cannot delete self)."""
+    from .dependencies import require_auth
+    caller = require_auth(request)
+
+    if caller.id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    db = get_db()
+    target = db.get_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.delete(user_id)
+    auth_log.info(
+        "DELETE_USER target_id=%d target_email=%s by=%s ip=%s",
+        user_id, target.email, caller.email, _client_ip(request),
+    )
+
+    return {"status": "deleted", "user_id": user_id, "email": target.email}
+
+
 # ── GitHub OAuth ────────────────────────────────────────────────────
 
 @auth_router.get("/github")
