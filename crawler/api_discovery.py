@@ -72,11 +72,12 @@ class APIDiscoveryScanner:
             headers={"User-Agent": settings.user_agent},
             verify=False,
         ) as client:
-            # Phase 1: Probe well-known paths
-            tasks = [
+            # Phase 1: Probe well-known paths + the root URL itself
+            tasks = [self._probe_root(client)]
+            tasks.extend(
                 self._probe_path(client, path)
                 for path in settings.api_discovery_paths
-            ]
+            )
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -90,13 +91,75 @@ class APIDiscoveryScanner:
                 findings.extend(self._assess_endpoint(ep))
 
             # Phase 2: If we found OpenAPI/Swagger specs, parse and optionally test
+            spec_endpoints = [
+                ep for ep in endpoints
+                if ep.spec_data and ep.endpoint_type in ("openapi", "swagger")
+            ]
             if probe_endpoints:
-                for ep in endpoints:
-                    if ep.spec_data and ep.endpoint_type in ("openapi", "swagger"):
+                if spec_endpoints:
+                    logger.info(
+                        f"Active scanning: found {len(spec_endpoints)} OpenAPI/Swagger spec(s), "
+                        f"probing their endpoints..."
+                    )
+                    for ep in spec_endpoints:
                         spec_findings = await self._analyze_spec(client, ep)
                         findings.extend(spec_findings)
+                else:
+                    logger.info(
+                        "Active scanning requested but no OpenAPI/Swagger specs were discovered — "
+                        "nothing to probe. Only well-known path scan results available."
+                    )
 
         return endpoints, findings
+
+    async def _probe_root(self, client: httpx.AsyncClient) -> APIEndpoint | None:
+        """Check if the root URL itself serves an API spec (JSON/YAML)."""
+        url = self.base_url + "/"
+        try:
+            resp = await client.get(url)
+        except Exception:
+            return None
+
+        if resp.status_code >= 400:
+            return None
+
+        ct = resp.headers.get("content-type", "")
+        body = resp.text[:50_000]
+
+        # Only interesting if root returns JSON that looks like a spec
+        if "json" not in ct and not body.lstrip().startswith("{"):
+            return None
+
+        endpoint_type = self._classify_endpoint("", ct, body)
+        if endpoint_type not in ("openapi", "swagger"):
+            return None
+
+        spec_data = None
+        try:
+            spec_data = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+
+        title = ""
+        if spec_data:
+            title = spec_data.get("info", {}).get("title", "")
+
+        logger.info(
+            f"API spec at root URL: {url} "
+            f"(type={endpoint_type}, title={title})"
+        )
+
+        return APIEndpoint(
+            url=url,
+            path="/",
+            status_code=resp.status_code,
+            content_type=ct,
+            size=len(body),
+            endpoint_type=endpoint_type,
+            spec_data=spec_data,
+            title=title,
+            snippet=body[:500],
+        )
 
     async def _probe_path(
         self, client: httpx.AsyncClient, path: str
@@ -110,11 +173,19 @@ class APIDiscoveryScanner:
             logger.debug(f"Could not reach {url}: {e}")
             return None
 
-        if resp.status_code >= 400:
-            return None
-
         ct = resp.headers.get("content-type", "")
         body = resp.text[:50_000]
+
+        # For most paths, skip client/server errors
+        # But for health/admin/debug, a 5xx still confirms the endpoint exists
+        if resp.status_code >= 400:
+            interesting_on_error = any(
+                x in path.lower()
+                for x in ["health", "healthz", "readyz", "admin", "debug",
+                           "actuator", "status", "_status", "_health"]
+            )
+            if not (interesting_on_error and resp.status_code >= 500):
+                return None
 
         # Skip tiny or empty responses
         if len(body.strip()) < 5:

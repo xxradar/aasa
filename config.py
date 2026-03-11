@@ -50,6 +50,15 @@ class Settings(BaseSettings):
         "api/v1/openapi.json", "api/v1/swagger.json",
         "api/v2/openapi.json", "api/v2/swagger.json",
         ".well-known/openapi.yaml",
+        ".well-known/openapi.json",
+        # Root-level spec (some APIs serve spec at root or /spec)
+        "spec", "spec.json", "spec.yaml",
+        "api/spec", "api/spec.json",
+        "v1/swagger.json", "v2/swagger.json",
+        "v3/openapi.json",
+        # FastAPI / Django REST / Rails
+        "api/docs", "api/redoc",
+        "api/v1/docs", "api/v2/docs",
         # GraphQL
         "graphql", "graphiql", "playground",
         "api/graphql", "v1/graphql",
