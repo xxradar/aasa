@@ -167,6 +167,107 @@ This PDF has been deeply analyzed by static rules, but you should look for what 
 Focus on sophisticated attacks that bypass pattern matching. Be thorough but precise with evidence."""
 
 
+# ── API Spec Security Review Prompt ──────────────────────────────────
+
+API_SPEC_REVIEW_PROMPT = """You are reviewing an OpenAPI/Swagger API specification for security risks, focusing on how an AI agent could abuse this API.
+
+## API Information
+- **Spec URL**: {spec_url}
+- **API Title**: {api_title}
+- **API Version**: {api_version}
+- **Base Server(s)**: {servers}
+- **Total Paths**: {path_count}
+- **Auth Schemes Defined**: {auth_schemes}
+
+## Static Analysis Pre-Findings
+{static_findings}
+
+## OpenAPI Specification (truncated)
+<api_spec>
+{spec_content}
+</api_spec>
+
+## Your Task
+Perform a deep security review of this API specification, focusing on AI agent attack surface:
+
+### 1. AUTHENTICATION & AUTHORIZATION
+- Are all endpoints protected? Which ones lack security definitions?
+- Are auth schemes strong (OAuth2, JWT) or weak (API key in query param)?
+- Can an agent bypass auth by hitting unprotected endpoints?
+- Are there endpoints that should require elevated privileges but don't specify them?
+
+### 2. IDOR & BROKEN ACCESS CONTROL
+- Identify endpoints with path parameters like /users/{{id}} that could allow enumeration
+- Flag endpoints where an agent could access other users' data by guessing IDs
+- Look for mass assignment risks (POST/PUT with broad request bodies)
+
+### 3. SENSITIVE DATA EXPOSURE
+- Do response schemas expose PII, internal IDs, or sensitive fields?
+- Are there endpoints returning user lists, credentials, tokens, or config?
+- Do error responses leak stack traces or internal details?
+- Are there fields in examples/defaults containing real credentials or tokens?
+
+### 4. DANGEROUS OPERATIONS
+- Identify destructive endpoints (DELETE, bulk operations, admin functions)
+- Flag endpoints that execute code, run commands, or upload files
+- Look for debug/internal endpoints that shouldn't be public
+- Assess rate limiting — can an agent flood the API?
+
+### 5. AI AGENT SPECIFIC RISKS
+- Could an agent chain multiple endpoints to escalate privileges?
+- Are there endpoints an agent could abuse for data exfiltration (export, download, webhook)?
+- Could an agent be tricked into calling destructive endpoints via prompt injection?
+- Does the API expose tool-calling patterns that mirror MCP/function-calling conventions?
+
+### 6. INFORMATION DISCLOSURE
+- Does the spec itself reveal internal architecture, database schemas, or infrastructure?
+- Are there server URLs pointing to internal/staging environments?
+- Do operation descriptions reveal business logic that aids attacks?
+
+Be precise — cite specific endpoints, parameters, and schema fields as evidence."""
+
+
+# ── API Response Body Analysis Prompt ────────────────────────────────
+
+API_RESPONSE_ANALYSIS_PROMPT = """Analyze the response bodies from actively probed API endpoints for security concerns.
+
+## API Information
+- **Base URL**: {base_url}
+- **Endpoints Probed**: {endpoints_probed}
+- **Successful (2xx) Responses**: {successful_count}
+
+## Probed Endpoint Responses
+{responses}
+
+## Your Task
+Analyze these actual API responses (obtained without authentication) for:
+
+### 1. DATA LEAKAGE
+- PII (names, emails, phone numbers, addresses)
+- Internal identifiers (database IDs, UUIDs that enable enumeration)
+- Infrastructure details (internal IPs, hostnames, service names, versions)
+- Session tokens, API keys, or credentials in response bodies or headers
+
+### 2. INFORMATION DISCLOSURE
+- Stack traces or debug information in error responses
+- Software versions, framework identifiers
+- Database query details or ORM artifacts
+- Internal API documentation or admin hints
+
+### 3. EXCESSIVE DATA EXPOSURE
+- Are responses returning more fields than necessary?
+- Are there nested objects with sensitive internal state?
+- Do list endpoints return unbounded results (no pagination)?
+
+### 4. AI AGENT EXPLOITATION
+- Could an agent use this data to craft further attacks?
+- Does the response contain instruction-like content that could manipulate agents?
+- Are there URLs or callbacks in responses that could be used for exfiltration?
+- Could response data be used to enumerate users, resources, or permissions?
+
+Focus on concrete, actionable findings with specific evidence from the responses."""
+
+
 SCAN_SUMMARY_PROMPT = """Provide a comprehensive security assessment summary for this AI agent attack surface scan.
 
 ## Target: {target_url}

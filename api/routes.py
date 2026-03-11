@@ -41,6 +41,10 @@ class APIScanRequest(BaseModel):
         default=False,
         description="If true, also probe individual endpoints found in OpenAPI/Swagger specs",
     )
+    enable_llm_review: bool = Field(
+        default=False,
+        description="If true, use LLM to deep-review discovered API specs and response bodies",
+    )
 
 
 class PromoteRequest(BaseModel):
@@ -252,6 +256,7 @@ async def scan_api(request: APIScanRequest):
             await scanner.scan_api(
                 request.url,
                 probe_endpoints=request.probe_endpoints,
+                enable_llm_review=request.enable_llm_review,
                 result=result,
             )
         except Exception as e:

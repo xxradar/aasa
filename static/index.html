@@ -288,9 +288,12 @@
       </div>
       <div class="options">
         <label><input type="checkbox" id="probeEndpoints"> Probe discovered endpoints (active scanning)</label>
+        <label style="margin-left: 16px;"><input type="checkbox" id="apiLlmReview"> LLM deep review (spec + response analysis)</label>
         <p style="color: var(--fg3); font-size: 11px; margin-left: 8px;">
           Probes ~60 well-known paths: OpenAPI, Swagger, GraphQL, actuator, admin, debug, health, metrics.
           Enable "Probe endpoints" to test individual API endpoints from discovered specs for unauthenticated access.
+          Enable "LLM deep review" to have Claude analyze discovered specs for IDOR, auth gaps, and data exposure,
+          plus review response bodies from probed endpoints.
         </p>
       </div>
     </div>
@@ -576,6 +579,7 @@ async function startApiScan() {
     const body = {
       url,
       probe_endpoints: document.getElementById('probeEndpoints').checked,
+      enable_llm_review: document.getElementById('apiLlmReview').checked,
     };
 
     const resp = await fetch('/api/v1/scan/api', {

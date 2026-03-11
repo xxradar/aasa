@@ -18,6 +18,8 @@ from prompts.judge_prompt import (
     AGENTIC_FILE_PROMPT,
     PDF_ANALYSIS_PROMPT,
     SCAN_SUMMARY_PROMPT,
+    API_SPEC_REVIEW_PROMPT,
+    API_RESPONSE_ANALYSIS_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,6 +163,101 @@ class LLMJudgeAnalyzer:
         )
 
         return await self._call_judge(prompt, url, purpose="pdf")
+
+    async def analyze_api_spec(
+        self,
+        spec_url: str,
+        spec_data: dict,
+        static_findings: list[Finding] | None = None,
+    ) -> list[Finding]:
+        """Analyze an OpenAPI/Swagger spec using LLM-as-judge.
+
+        Args:
+            spec_url: URL where the spec was discovered.
+            spec_data: Parsed OpenAPI/Swagger spec dict.
+            static_findings: Pre-existing findings from static analysis.
+        """
+        if not self.available:
+            return []
+
+        # Extract key metadata from spec
+        info = spec_data.get("info", {})
+        api_title = info.get("title", "Unknown")
+        api_version = info.get("version", "Unknown")
+        paths = spec_data.get("paths", {})
+        path_count = len(paths)
+
+        servers = spec_data.get("servers", [])
+        server_urls = ", ".join(s.get("url", "") for s in servers) if servers else "N/A"
+
+        # Auth schemes
+        security_defs = (
+            spec_data.get("securityDefinitions", {})
+            or spec_data.get("components", {}).get("securitySchemes", {})
+        )
+        auth_schemes = ", ".join(security_defs.keys()) if security_defs else "None"
+
+        # Format static findings
+        findings_text = "None" if not static_findings else "\n".join(
+            f"- [{f.severity.value.upper()}] {f.title}: {f.evidence[:100]}"
+            for f in (static_findings or [])
+        )
+
+        # Truncate spec for API limits — keep paths and components, drop examples
+        import json
+        spec_content = json.dumps(spec_data, indent=2)[:25_000]
+
+        prompt = API_SPEC_REVIEW_PROMPT.format(
+            spec_url=spec_url,
+            api_title=api_title,
+            api_version=api_version,
+            servers=server_urls,
+            path_count=path_count,
+            auth_schemes=auth_schemes,
+            static_findings=findings_text,
+            spec_content=spec_content,
+        )
+
+        return await self._call_judge(prompt, spec_url, purpose="api_spec")
+
+    async def analyze_api_responses(
+        self,
+        base_url: str,
+        probed_responses: list[dict],
+    ) -> list[Finding]:
+        """Analyze response bodies from actively probed API endpoints.
+
+        Args:
+            base_url: The API base URL.
+            probed_responses: List of dicts with keys:
+                path, status_code, content_type, body (truncated response body).
+        """
+        if not self.available:
+            return []
+
+        if not probed_responses:
+            return []
+
+        # Format responses for the prompt
+        response_blocks = []
+        for r in probed_responses[:15]:  # Cap at 15 to stay within token limits
+            response_blocks.append(
+                f"--- {r['path']} ---\n"
+                f"Status: {r['status_code']}\n"
+                f"Content-Type: {r.get('content_type', 'unknown')}\n"
+                f"Body:\n{r['body'][:2000]}\n"
+            )
+
+        successful = [r for r in probed_responses if 200 <= r["status_code"] < 300]
+
+        prompt = API_RESPONSE_ANALYSIS_PROMPT.format(
+            base_url=base_url,
+            endpoints_probed=len(probed_responses),
+            successful_count=len(successful),
+            responses="\n".join(response_blocks),
+        )
+
+        return await self._call_judge(prompt, base_url, purpose="api_responses")
 
     async def generate_summary(
         self,

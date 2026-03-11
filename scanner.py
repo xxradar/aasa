@@ -192,6 +192,7 @@ class Scanner:
         self,
         base_url: str,
         probe_endpoints: bool = False,
+        enable_llm_review: bool = False,
         result: ScanResult | None = None,
     ) -> ScanResult:
         """Run a dedicated API discovery scan.
@@ -200,6 +201,7 @@ class Scanner:
             base_url: Target URL to probe for API endpoints.
             probe_endpoints: If True, also probe individual endpoints
                              found in OpenAPI/Swagger specs.
+            enable_llm_review: If True, use LLM to deep-review specs and responses.
             result: Optional pre-created ScanResult for live status tracking.
         """
         scan_id = result.scan_id if result else str(uuid.uuid4())[:8]
@@ -209,17 +211,36 @@ class Scanner:
                 target_url=base_url,
                 started_at=datetime.now(timezone.utc),
             )
+        self.llm_judge._scan_id = scan_id
         result.status = "discovering_apis"
 
-        logger.info(f"[{scan_id}] API scan: probing {base_url} (probe_endpoints={probe_endpoints})")
+        # Pass LLM judge to API scanner if enabled
+        llm = self.llm_judge if (enable_llm_review and self.llm_judge.available) else None
+        if llm:
+            logger.info(f"[{scan_id}] API scan with LLM review: probing {base_url}")
+        else:
+            logger.info(f"[{scan_id}] API scan: probing {base_url} (probe_endpoints={probe_endpoints})")
 
-        api_scanner = APIDiscoveryScanner(base_url)
+        api_scanner = APIDiscoveryScanner(base_url, llm_judge=llm)
         endpoints, findings = await api_scanner.discover(probe_endpoints=probe_endpoints)
 
         logger.info(
             f"[{scan_id}] API scan: {len(endpoints)} endpoints discovered, "
             f"{len(findings)} findings"
         )
+
+        # Generate executive summary if LLM is available
+        if llm and findings:
+            result.status = "llm_analysis"
+            try:
+                result.llm_judge_analysis = await self.llm_judge.generate_summary(
+                    target_url=base_url,
+                    pages_crawled=0,
+                    agentic_files_count=0,
+                    all_findings=findings,
+                )
+            except Exception as e:
+                logger.error(f"[{scan_id}] LLM summary failed: {e}")
 
         # Build a summary page to hold findings
         page = CrawledPage(

@@ -50,8 +50,9 @@ class APIDiscoveryScanner:
     2. Standalone API scan — deeper analysis with optional endpoint testing
     """
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, llm_judge=None):
         self.base_url = base_url.rstrip("/")
+        self.llm_judge = llm_judge  # Optional LLMJudgeAnalyzer instance
 
     async def discover(self, probe_endpoints: bool = False) -> tuple[list[APIEndpoint], list[Finding]]:
         """Probe all well-known API paths.
@@ -95,6 +96,30 @@ class APIDiscoveryScanner:
                 ep for ep in endpoints
                 if ep.spec_data and ep.endpoint_type in ("openapi", "swagger")
             ]
+
+            # Phase 2a: LLM deep review of discovered specs
+            if self.llm_judge and self.llm_judge.available and spec_endpoints:
+                logger.info(
+                    f"LLM reviewing {len(spec_endpoints)} API spec(s)..."
+                )
+                # Collect static findings for context
+                static_api_findings = list(findings)
+                for ep in spec_endpoints:
+                    try:
+                        llm_findings = await self.llm_judge.analyze_api_spec(
+                            spec_url=ep.url,
+                            spec_data=ep.spec_data,
+                            static_findings=static_api_findings,
+                        )
+                        findings.extend(llm_findings)
+                        logger.info(
+                            f"LLM spec review of {ep.url}: {len(llm_findings)} findings"
+                        )
+                    except Exception as e:
+                        logger.error(f"LLM spec review failed for {ep.url}: {e}")
+
+            # Phase 2b: Active endpoint probing
+            probed_responses: list[dict] = []
             if probe_endpoints:
                 if spec_endpoints:
                     logger.info(
@@ -102,13 +127,31 @@ class APIDiscoveryScanner:
                         f"probing their endpoints..."
                     )
                     for ep in spec_endpoints:
-                        spec_findings = await self._analyze_spec(client, ep)
+                        spec_findings, responses = await self._analyze_spec(client, ep)
                         findings.extend(spec_findings)
+                        probed_responses.extend(responses)
                 else:
                     logger.info(
                         "Active scanning requested but no OpenAPI/Swagger specs were discovered — "
                         "nothing to probe. Only well-known path scan results available."
                     )
+
+            # Phase 2c: LLM review of probed response bodies
+            if self.llm_judge and self.llm_judge.available and probed_responses:
+                logger.info(
+                    f"LLM reviewing {len(probed_responses)} probed API response(s)..."
+                )
+                try:
+                    resp_findings = await self.llm_judge.analyze_api_responses(
+                        base_url=self.base_url,
+                        probed_responses=probed_responses,
+                    )
+                    findings.extend(resp_findings)
+                    logger.info(
+                        f"LLM response review: {len(resp_findings)} findings"
+                    )
+                except Exception as e:
+                    logger.error(f"LLM response review failed: {e}")
 
         return endpoints, findings
 
@@ -455,12 +498,18 @@ class APIDiscoveryScanner:
 
     async def _analyze_spec(
         self, client: httpx.AsyncClient, ep: APIEndpoint
-    ) -> list[Finding]:
-        """Parse spec and probe individual endpoints (active scanning)."""
+    ) -> tuple[list[Finding], list[dict]]:
+        """Parse spec and probe individual endpoints (active scanning).
+
+        Returns:
+            (findings, probed_responses) — probed_responses is a list of dicts
+            with keys: path, status_code, content_type, body for LLM analysis.
+        """
         findings = []
+        probed_responses: list[dict] = []
         spec = ep.spec_data
         if not spec:
-            return findings
+            return findings, probed_responses
 
         paths = spec.get("paths", {})
         # Determine base URL from spec servers
@@ -490,6 +539,17 @@ class APIDiscoveryScanner:
             probed += 1
             try:
                 resp = await client.get(full_url)
+                ct = resp.headers.get("content-type", "")
+                body = resp.text[:5000]
+
+                # Collect response for LLM analysis
+                probed_responses.append({
+                    "path": path,
+                    "status_code": resp.status_code,
+                    "content_type": ct,
+                    "body": body,
+                })
+
                 if resp.status_code < 400:
                     unprotected.append((path, resp.status_code))
             except Exception:
@@ -511,7 +571,7 @@ class APIDiscoveryScanner:
                 recommendation="Add authentication to API endpoints or restrict access.",
             ))
 
-        return findings
+        return findings, probed_responses
 
     def _severity_for_type(self, endpoint_type: str) -> Severity:
         """Map endpoint type to finding severity."""
