@@ -139,23 +139,49 @@ When duplicates share a fingerprint, AASA keeps the highest-severity instance, p
 │  ┌──────────────────────────────────────────────────┐    │
 │  │         LLM-as-Judge (Claude API)                │    │
 │  │  • Page analysis    • Agentic file analysis      │    │
-│  │  • PDF content      • Executive summary          │    │
+│  │  • PDF content      • API spec security review   │    │
+│  │  • API responses    • Executive summary          │    │
 │  └──────────────────────────────────────────────────┘    │
 │                        │                                 │
 │                        v                                 │
 │  ┌──────────────────────────────────────────────────┐    │
-│  │  Deduplication → Risk Scoring → JSON Output      │    │
+│  │  Dedup → Risk Score → Rule Learning → JSON       │    │
 │  └──────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### Scan Pipeline (5 Phases)
 
-1. **Crawl** — Async HTTP crawl (configurable depth/pages) + parallel agentic file probing + PDF download
+1. **Crawl** — Async HTTP crawl (configurable depth/pages) + parallel agentic file probing + API endpoint discovery + PDF download
 2. **Static Analysis** — 6 rule-based analyzers run on every page, agentic file, and PDF (29+ regex patterns for PDFs)
-3. **LLM Judge** — Top 5 pages by finding count + all agentic files + PDF extracted text sent to Claude for deep analysis
+3. **LLM Judge** — Top 5 pages by finding count + all agentic files + PDF extracted text + API specs + probed response bodies sent to Claude for deep analysis
 4. **Compile** — Deduplication, risk score computation, finding aggregation
 5. **Persist** — Results saved as timestamped JSON to `results/` directory
+
+
+### API Endpoint Discovery & Analysis *(preview)*
+
+> **Note:** This feature is in preview — actively being tested and refined.
+
+AASA can probe targets for well-known API documentation and management endpoints, discovering attack surface that AI agents could leverage. It scans ~60+ well-known paths including OpenAPI/Swagger specs, GraphQL endpoints, Spring Boot Actuator, health/status, admin panels, debug endpoints, and metrics exporters.
+
+Three scan modes:
+
+- **Passive discovery** (runs automatically during every website scan) — probes well-known paths, parses discovered specs for missing auth definitions, sensitive endpoints, and credential references
+- **Active probing** (opt-in) — hits individual GET endpoints from discovered OpenAPI/Swagger specs to verify unauthenticated access. Supports both OpenAPI 3.x (`servers`) and Swagger 2.x (`host` + `basePath` + `schemes`) for correct base URL resolution
+- **LLM deep review** (opt-in) — sends discovered specs to Claude for security review (IDOR, broken access control, mass assignment, dangerous operations, AI agent exploitation vectors) and analyzes probed response bodies for data leakage, PII exposure, and information disclosure
+
+### Rule Learning *(preview)*
+
+> **Note:** This feature is in preview.
+
+When the LLM judge identifies novel findings that static analyzers missed, AASA can automatically extract regex patterns from those findings and store them as "learned rules." These rules go through a lifecycle: candidate → validated → active → rejected. Active rules run as part of static analysis on future scans, reducing LLM API usage over time while retaining detection capability.
+
+### Authentication & User Management *(preview)*
+
+> **Note:** This feature is in preview.
+
+AASA supports optional authentication with local email/password registration, GitHub OAuth, and Google OAuth. JWTs are stored as HttpOnly cookies. User management endpoints allow listing and deleting registered users. All auth events (register, login, logout, failed attempts, user deletion) are logged to a persistent `auth.log` with client IP tracking.
 
 
 ## Installation & Usage
@@ -189,6 +215,13 @@ All settings use the `AASA_` environment prefix and can be set in `.env` or `doc
 | `AASA_MAX_PAGES` | `50` | Max pages per scan |
 | `AASA_PORT` | `6001` | Server port |
 | `AASA_RESULTS_DIR` | `/app/results` | Persistent results directory |
+| `AASA_AUTH_ENABLED` | `false` | Enable authentication *(preview)* |
+| `AASA_JWT_SECRET` | *(auto-generated)* | JWT signing secret |
+| `AASA_GITHUB_CLIENT_ID` | *(none)* | GitHub OAuth client ID |
+| `AASA_GITHUB_CLIENT_SECRET` | *(none)* | GitHub OAuth client secret |
+| `AASA_GOOGLE_CLIENT_ID` | *(none)* | Google OAuth client ID |
+| `AASA_GOOGLE_CLIENT_SECRET` | *(none)* | Google OAuth client secret |
+| `AASA_RULE_LEARNING_ENABLED` | `true` | Enable automatic rule extraction *(preview)* |
 
 ### CLI Usage
 
@@ -223,20 +256,31 @@ All endpoints are under `/api/v1`. Full OpenAPI spec at `/docs`.
 | `POST` | `/scan/sync` | Blocking website scan |
 | `POST` | `/scan/pdf` | Start async PDF scan (returns `scan_id`) |
 | `POST` | `/scan/pdf/sync` | Blocking PDF scan |
+| `POST` | `/scan/api` | Start async API discovery scan *(preview)* |
 | `GET` | `/scan/{scan_id}` | Poll scan status / get results |
 | `GET` | `/scans` | List all in-memory scans |
 | `GET` | `/results` | List persisted result files |
 | `GET` | `/results/{filename}` | Load a specific result |
 | `GET` | `/health` | Service health check |
 | `GET` | `/analyzers` | List available analyzers |
+| `GET` | `/rules` | List learned rules *(preview)* |
+| `GET` | `/rules/stats` | Rule database statistics |
+| `POST` | `/rules/{id}/promote` | Promote a rule's lifecycle state |
+| `GET` | `/usage` | LLM token usage and cost breakdown |
+| `GET` | `/auth/users` | List registered users *(preview)* |
+| `DELETE`| `/auth/users/{id}` | Delete a user *(preview)* |
+| `POST` | `/demo/run` | Launch demo scans against built-in poisoned fixtures |
 
 ### Web UI
 
 The built-in web UI at `http://localhost:6001` provides:
 
-- **Scanner tab**: Toggle between website and PDF scan modes, configure depth/pages, enable LLM judge
+- **Scanner tab**: Three scan modes — Website, PDF, and API — with per-mode options (depth/pages, LLM judge, active probing, LLM deep review)
 - **History tab**: Browse all persisted scan results with risk scores, reload any previous scan
-- **Non-blocking scans**: Progress bar with phase tracking (Crawling → Analyzing → LLM Analysis → Complete)
+- **Rules tab**: View, test, promote, and reject learned rules *(preview)*
+- **Demo mode**: One-click demo scans against built-in poisoned fixtures (HTML page + PDF) with LLM judge enabled
+- **Non-blocking scans**: Progress bar with phase tracking (Crawling → Analyzing → API Discovery → LLM Analysis → Rule Learning → Complete)
+- **Authentication**: Optional login/register with email/password, GitHub OAuth, and Google OAuth *(preview)*
 
 
 ## Static Analyzers
@@ -275,8 +319,16 @@ aasa/
 ├── models.py                # Data models (Finding, ScanResult, etc.)
 ├── scanner.py               # Scan orchestrator (5-phase pipeline)
 ├── cli.py                   # CLI interface
+├── rule_manager.py          # Learned rule lifecycle management
+├── usage_tracker.py         # LLM token usage tracking
 ├── api/
 │   └── routes.py            # REST API endpoints (async + sync)
+├── auth/                    # Authentication system (preview)
+│   ├── routes.py            # Login, register, OAuth, user management
+│   ├── models.py            # User, TokenResponse models
+│   ├── database.py          # SQLite user store
+│   ├── jwt.py               # JWT token handling
+│   └── dependencies.py      # Auth middleware (get_current_user, require_auth)
 ├── analyzers/
 │   ├── base.py              # Base analyzer class
 │   ├── prompt_injection.py  # Prompt injection patterns
@@ -286,17 +338,24 @@ aasa/
 │   ├── exfiltration.py      # Data exfiltration vectors
 │   ├── markdown_injection.py# Markdown injection attacks
 │   ├── pdf_analyzer.py      # PDF deep inspection (9 passes)
-│   └── llm_judge.py         # LLM-as-judge analyzer
+│   ├── llm_judge.py         # LLM-as-judge analyzer (pages, PDFs, API specs, responses)
+│   └── learned_rules.py     # Learned rule static analyzer
 ├── crawler/
 │   ├── crawler.py           # Async web crawler
-│   └── agentic_signals.py   # Agentic file scanner
+│   ├── agentic_signals.py   # Agentic file scanner
+│   └── api_discovery.py     # API endpoint discovery & spec analysis (preview)
 ├── prompts/
-│   └── judge_prompt.py      # LLM judge prompt templates
+│   ├── judge_prompt.py      # LLM judge prompt templates
+│   └── rule_extraction_prompt.py  # Rule learning prompts
 ├── static/
 │   └── index.html           # Web UI (single-page app)
+├── tests/
+│   ├── fixtures/            # Poisoned test fixtures (HTML + PDF)
+│   └── ...
 ├── results/                 # Persisted scan results (JSON)
 ├── Dockerfile
 ├── docker-compose.yml
+├── k8s/                     # Kubernetes deployment manifests
 ├── requirements.txt
 └── .env.example
 ```
