@@ -496,6 +496,35 @@ class APIDiscoveryScanner:
 
         return findings
 
+    def _resolve_api_base(self, spec: dict) -> str:
+        """Resolve the actual API base URL from a spec.
+
+        Handles both:
+        - OpenAPI 3.x: servers[0].url
+        - Swagger 2.x: schemes + host + basePath
+        """
+        # OpenAPI 3.x
+        servers = spec.get("servers", [])
+        if servers:
+            url = servers[0].get("url", "")
+            if url.startswith("http"):
+                return url.rstrip("/")
+            if url.startswith("/"):
+                return self.base_url + url.rstrip("/")
+
+        # Swagger 2.x
+        host = spec.get("host")
+        if host:
+            schemes = spec.get("schemes", ["https"])
+            scheme = "https" if "https" in schemes else schemes[0]
+            base_path = spec.get("basePath", "").rstrip("/")
+            resolved = f"{scheme}://{host}{base_path}"
+            logger.info(f"Swagger 2.x base URL resolved: {resolved}")
+            return resolved
+
+        # Fallback: use the URL we scanned
+        return self.base_url
+
     async def _analyze_spec(
         self, client: httpx.AsyncClient, ep: APIEndpoint
     ) -> tuple[list[Finding], list[dict]]:
@@ -512,13 +541,7 @@ class APIDiscoveryScanner:
             return findings, probed_responses
 
         paths = spec.get("paths", {})
-        # Determine base URL from spec servers
-        servers = spec.get("servers", [])
-        api_base = servers[0].get("url", "") if servers else ""
-        if api_base.startswith("/"):
-            api_base = self.base_url + api_base
-        elif not api_base.startswith("http"):
-            api_base = self.base_url
+        api_base = self._resolve_api_base(spec)
 
         # Probe GET endpoints only (safe)
         probed = 0
